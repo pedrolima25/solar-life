@@ -114,7 +114,7 @@ def seed(db: Session):
     if not db.query(models.User).first():
         db.add(models.User(
             name="Administrador",
-            email=os.getenv("ADMIN_EMAIL", "admin@solar.com"),
+            email=os.getenv("ADMIN_EMAIL", "admin@solar.com").strip().lower(),
             password_hash=hash_password(_senha_admin()),
             role="admin",
         ))
