@@ -1,0 +1,142 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --background: #f6f7f9;
+  --foreground: #0f172a;
+  --card: #ffffff;
+  --muted: #eef1f5;
+  --muted-foreground: #64748b;
+  --border: #e2e8f0;
+  --primary: #f59e0b;
+  --primary-strong: #d97706;
+  --accent: #0ea5e9;
+}
+
+.dark {
+  --background: #0b1120;
+  --foreground: #e2e8f0;
+  --card: #111a2e;
+  --muted: #1a2540;
+  --muted-foreground: #8b9bb8;
+  --border: #22304d;
+  --primary: #fbbf24;
+  --primary-strong: #f59e0b;
+  --accent: #38bdf8;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-primary: var(--primary);
+  --color-primary-strong: var(--primary-strong);
+  --color-accent: var(--accent);
+  --font-sans: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+/* Preenchimento automático do navegador sem fundo azul-claro */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--foreground);
+  -webkit-box-shadow: 0 0 0 1000px var(--background) inset;
+  caret-color: var(--foreground);
+  transition: background-color 9999s ease-in-out 0s;
+}
+
+@utility solar-gradient {
+  background: linear-gradient(135deg, #f59e0b 0%, #f97316 55%, #ea580c 100%);
+}
+
+@utility input {
+  @apply w-full rounded-xl border border-border bg-background px-3 py-2.5 text-base sm:text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:opacity-60;
+}
+
+@utility btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none;
+}
+@utility btn-primary {
+  @apply btn solar-gradient text-white shadow-lg shadow-orange-500/20 hover:brightness-110;
+}
+@utility btn-ghost {
+  @apply btn border border-border bg-card text-foreground hover:bg-muted;
+}
+@utility btn-danger {
+  @apply btn border border-red-500/30 bg-red-500/10 text-red-500 hover:bg-red-500/20;
+}
+
+@utility card {
+  @apply rounded-2xl border border-border bg-card;
+}
+
+@utility label {
+  @apply mb-1 block text-xs font-semibold uppercase tracking-wide text-muted-foreground;
+}
+
+.table-base {
+  @apply w-full text-sm;
+}
+.table-base th {
+  @apply px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground border-b border-border;
+}
+.table-base td {
+  @apply px-4 py-3 border-b border-border/60;
+}
+.table-base tbody tr:hover {
+  @apply bg-muted/50;
+}
+
+/* Celular: cada linha da tabela vira um cartão */
+@media (max-width: 639px) {
+  .table-base thead {
+    display: none;
+  }
+  .table-base,
+  .table-base tbody {
+    display: block;
+  }
+  .table-base tbody tr {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.25rem 0.75rem;
+    padding: 0.85rem 1rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .table-base td {
+    display: block;
+    padding: 0;
+    border: 0;
+    text-align: left !important;
+  }
+  .table-base td:empty {
+    display: none;
+  }
+  /* última coluna (ações) ocupa a linha inteira */
+  .table-base td:last-child {
+    flex-basis: 100%;
+  }
+  .table-base td:last-child > div {
+    justify-content: flex-start;
+  }
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: white;
+    color: black;
+  }
+}
