@@ -154,9 +154,12 @@ def approve_quote(qid: str, data: s.ApproveIn, db: Session = Depends(get_db)):
                                                    quantity=it.quantity, unit_price=it.unit_price,
                                                    component=it.component, qty_label=it.qty_label,
                                                    position=it.position))
-        if q.discount:
-            o.items.append(models.ServiceOrderItem(description="Desconto", quantity=1, unit_price=-q.discount,
-                                                   position=len(q.items)))
+        # Diferença entre os itens e o total do orçamento (desconto ou valor do investimento digitado),
+        # para a OS fechar com o mesmo total
+        ajuste = round((q.total or 0) - (q.subtotal or 0), 2)
+        if ajuste:
+            o.items.append(models.ServiceOrderItem(description="Desconto" if ajuste < 0 else "Ajuste de valor",
+                                                   quantity=1, unit_price=ajuste, position=len(q.items)))
         db.add(o)
         db.flush()
         q.os_id = o.id

@@ -2,8 +2,10 @@
 
 import { Pencil, Plus, SolarPanel, Trash2, Zap } from "lucide-react";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
+import { confirmDialog, focusFirstInvalid, toast } from "@/components/feedback";
 import { Badge, Empty, ErrorBox, Field, Loading, Modal, PageHeader, useFormBinder } from "@/components/ui";
+import { hasErrors, rules, validate } from "@/lib/validation";
 import { api } from "@/lib/api";
 import { INSTALLATION_STATUS, INSTALLATION_TYPES, LIGACOES } from "@/lib/constants";
 import { date, num } from "@/lib/format";
@@ -27,12 +29,28 @@ function InstalacoesContent() {
   const bind = useFormBinder(form ?? {}, setForm);
   const isSolar = form?.type?.startsWith("Solar");
 
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  useEffect(() => { if (!form) { setErrors({}); setFormError(""); } }, [form]);
+
   async function save() {
+    const nonNeg = (label: string) => [rules.min(0, label)];
+    const e = validate(form, {
+      client_id: [rules.required("Cliente")],
+      name: [rules.required("Identificação")],
+      potencia_kwp: nonNeg("Potência"),
+      num_modulos: nonNeg("Nº de módulos"),
+      geracao_estimada_kwh: nonNeg("Geração"),
+      potencia_inversor_kw: nonNeg("Potência do inversor"),
+      warranty_until: [(v) => (v && form.installation_date && v < form.installation_date ? "A garantia não pode terminar antes da instalação." : null)],
+    }) as Record<string, string>;
+    setErrors(e);
+    if (hasErrors(e)) return focusFirstInvalid();
     setFormError("");
     try {
       const { id, client, ...body } = form;
       for (const k of ["installation_date", "warranty_until"]) if (!body[k]) body[k] = null;
       await api(id ? `/installations/${id}` : "/installations", { method: id ? "PUT" : "POST", json: body });
+      toast.success(id ? "Instalação atualizada" : "Instalação cadastrada", form.name);
       setForm(null);
       reload();
     } catch (e: any) {
@@ -41,9 +59,14 @@ function InstalacoesContent() {
   }
 
   async function remove(i: any) {
-    if (!confirm(`Excluir a instalação "${i.name}"?`)) return;
-    await api(`/installations/${i.id}`, { method: "DELETE" }).catch((e) => alert(e.message));
-    reload();
+    if (!(await confirmDialog({ title: `Excluir a instalação "${i.name}"?`, message: "Essa ação não pode ser desfeita.", danger: true, confirmText: "Excluir" }))) return;
+    try {
+      await api(`/installations/${i.id}`, { method: "DELETE" });
+      toast.success("Instalação excluída", i.name);
+      reload();
+    } catch (e) {
+      toast.error(e, "Não foi possível excluir");
+    }
   }
 
   const totalKwp = items.reduce((s, i) => s + (i.potencia_kwp || 0), 0);
@@ -109,14 +132,14 @@ function InstalacoesContent() {
       {form && (
         <Modal title={form.id ? "Editar instalação" : "Nova instalação"} onClose={() => setForm(null)} size="xl"
           footer={<><button className="btn-ghost" onClick={() => setForm(null)}>Cancelar</button>
-            <button className="btn-primary" disabled={!form.client_id || !form.name} onClick={save}>Salvar</button></>}>
+            <button className="btn-primary" onClick={save}>Salvar</button></>}>
           <ErrorBox message={formError} />
           <div className="grid gap-4 sm:grid-cols-6">
-            <Field label="Cliente" className="sm:col-span-3">
+            <Field label="Cliente" className="sm:col-span-3" required error={errors.client_id}>
               <select className="input" {...bind("client_id")}><option value="">Selecione...</option>
                 {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
             </Field>
-            <Field label="Identificação" className="sm:col-span-3"><input className="input" placeholder="Ex.: Usina residencial, Quadro galpão" {...bind("name")} /></Field>
+            <Field label="Identificação" className="sm:col-span-3" required error={errors.name}><input className="input" placeholder="Ex.: Usina residencial, Quadro galpão" {...bind("name")} /></Field>
             <Field label="Tipo" className="sm:col-span-2"><select className="input" {...bind("type")}>{INSTALLATION_TYPES.map((t) => <option key={t}>{t}</option>)}</select></Field>
             <Field label="Status" className="sm:col-span-2"><select className="input" {...bind("status")}>{INSTALLATION_STATUS.map((t) => <option key={t}>{t}</option>)}</select></Field>
             <Field label="Ligação" className="sm:col-span-2"><select className="input" {...bind("tipo_ligacao")}>{LIGACOES.map((t) => <option key={t}>{t}</option>)}</select></Field>
@@ -128,12 +151,12 @@ function InstalacoesContent() {
             {isSolar && (
               <>
                 <p className="label sm:col-span-6 mt-2 text-primary">Sistema fotovoltaico</p>
-                <Field label="Potência (kWp)" className="sm:col-span-2"><input className="input" type="number" step="0.01" {...bind("potencia_kwp", "number")} /></Field>
-                <Field label="Nº de módulos" className="sm:col-span-2"><input className="input" type="number" {...bind("num_modulos", "number")} /></Field>
-                <Field label="Geração estimada (kWh/mês)" className="sm:col-span-2"><input className="input" type="number" {...bind("geracao_estimada_kwh", "number")} /></Field>
+                <Field label="Potência (kWp)" className="sm:col-span-2" error={errors.potencia_kwp}><input className="input" type="number" step="0.01" {...bind("potencia_kwp", "number")} /></Field>
+                <Field label="Nº de módulos" className="sm:col-span-2" error={errors.num_modulos}><input className="input" type="number" {...bind("num_modulos", "number")} /></Field>
+                <Field label="Geração estimada (kWh/mês)" className="sm:col-span-2" error={errors.geracao_estimada_kwh}><input className="input" type="number" {...bind("geracao_estimada_kwh", "number")} /></Field>
                 <Field label="Modelo dos módulos" className="sm:col-span-3"><input className="input" {...bind("modulo_modelo")} /></Field>
                 <Field label="Modelo do inversor" className="sm:col-span-3"><input className="input" {...bind("inversor_modelo")} /></Field>
-                <Field label="Potência do inversor (kW)" className="sm:col-span-2"><input className="input" type="number" step="0.1" {...bind("potencia_inversor_kw", "number")} /></Field>
+                <Field label="Potência do inversor (kW)" className="sm:col-span-2" error={errors.potencia_inversor_kw}><input className="input" type="number" step="0.1" {...bind("potencia_inversor_kw", "number")} /></Field>
                 <Field label="Estrutura" className="sm:col-span-4"><input className="input" placeholder="Telhado cerâmico, metálico, laje, solo..." {...bind("estrutura")} /></Field>
                 {form.type !== "Solar On-Grid" && (
                   <>
@@ -145,7 +168,7 @@ function InstalacoesContent() {
             )}
             <Field label="Disjuntor geral" className="sm:col-span-2"><input className="input" {...bind("disjuntor_geral")} /></Field>
             <Field label="Data de instalação" className="sm:col-span-2"><input className="input" type="date" {...bind("installation_date")} /></Field>
-            <Field label="Garantia até" className="sm:col-span-2"><input className="input" type="date" {...bind("warranty_until")} /></Field>
+            <Field label="Garantia até" className="sm:col-span-2" error={errors.warranty_until}><input className="input" type="date" {...bind("warranty_until")} /></Field>
             <Field label="Descrição / observações" className="sm:col-span-6"><textarea className="input" rows={3} {...bind("description")} /></Field>
           </div>
         </Modal>

@@ -75,6 +75,27 @@ input:-webkit-autofill:focus {
   @apply btn border border-red-500/30 bg-red-500/10 text-red-500 hover:bg-red-500/20;
 }
 
+@utility btn-danger-solid {
+  @apply btn bg-red-500 text-white shadow-lg shadow-red-500/20 hover:bg-red-600;
+}
+
+/* Campo com erro de validação (aria-invalid é posto pelo <Field error>) */
+.input[aria-invalid="true"] {
+  @apply border-red-500 focus:border-red-500 focus:ring-red-500/20;
+}
+
+/* Entrada dos avisos e da janela de confirmação */
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(-8px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+.toast-in {
+  animation: toast-in 0.18s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast-in { animation: none; }
+}
+
 @utility card {
   @apply rounded-2xl border border-border bg-card;
 }

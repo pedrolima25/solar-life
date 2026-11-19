@@ -1,8 +1,10 @@
 "use client";
 
 import { ArrowDownUp, Package, Pencil, Plus, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { confirmDialog, focusFirstInvalid, toast } from "@/components/feedback";
 import { Badge, Empty, ErrorBox, Field, Loading, Modal, PageHeader, StatCard, useFormBinder } from "@/components/ui";
+import { hasErrors, rules, validate } from "@/lib/validation";
 import { api } from "@/lib/api";
 import { PRODUCT_CATEGORIES } from "@/lib/constants";
 import { brl, num } from "@/lib/format";
@@ -21,11 +23,32 @@ export default function EstoquePage() {
   const [formError, setFormError] = useState("");
   const bind = useFormBinder(form ?? {}, setForm);
 
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  useEffect(() => { if (!form) { setErrors({}); setFormError(""); } }, [form]);
+
   async function save() {
+    const e = validate(form, {
+      name: [rules.required("Nome")],
+      unit: [rules.required("Unidade")],
+      cost_price: [rules.min(0, "Preço de custo")],
+      sale_price: [rules.min(0, "Preço de venda")],
+      min_stock: [rules.min(0, "Estoque mínimo")],
+    }) as Record<string, string>;
+    setErrors(e);
+    if (hasErrors(e)) return focusFirstInvalid();
+    if (form.sale_price > 0 && form.cost_price > form.sale_price) {
+      const ok = await confirmDialog({
+        title: "Preço de venda menor que o custo",
+        message: `Custo ${brl(form.cost_price)} e venda ${brl(form.sale_price)}: esse item dá prejuízo. Salvar mesmo assim?`,
+        confirmText: "Salvar assim",
+      });
+      if (!ok) return;
+    }
     setFormError("");
     try {
       const { id, ...body } = form;
       await api(id ? `/products/${id}` : "/products", { method: id ? "PUT" : "POST", json: body });
+      toast.success(id ? "Item atualizado" : "Item cadastrado", form.name);
       setForm(null);
       reload();
     } catch (e: any) {
@@ -35,15 +58,34 @@ export default function EstoquePage() {
 
   async function doMove() {
     if (!move) return;
-    await api(`/products/${move.p.id}/move`, { method: "POST", json: { quantity: move.kind === "in" ? move.qty : -move.qty } });
-    setMove(null);
-    reload();
+    if (!(move.qty > 0)) return toast.warning("Informe a quantidade", "A quantidade deve ser maior que zero.");
+    if (move.kind === "out" && move.qty > move.p.stock) {
+      const ok = await confirmDialog({
+        title: "Saída maior que o estoque",
+        message: `Saldo atual: ${num(move.p.stock, 2)} ${move.p.unit}. O estoque ficará negativo. Continuar?`,
+        confirmText: "Registrar saída",
+      });
+      if (!ok) return;
+    }
+    try {
+      await api(`/products/${move.p.id}/move`, { method: "POST", json: { quantity: move.kind === "in" ? move.qty : -move.qty } });
+      toast.success(move.kind === "in" ? "Entrada registrada" : "Saída registrada", `${num(move.qty, 2)} ${move.p.unit} · ${move.p.name}`);
+      setMove(null);
+      reload();
+    } catch (e) {
+      toast.error(e, "Não foi possível movimentar o estoque");
+    }
   }
 
   async function remove(p: any) {
-    if (!confirm(`Excluir "${p.name}"?`)) return;
-    await api(`/products/${p.id}`, { method: "DELETE" }).catch((e) => alert(e.message));
-    reload();
+    if (!(await confirmDialog({ title: `Excluir "${p.name}"?`, message: "Essa ação não pode ser desfeita.", danger: true, confirmText: "Excluir" }))) return;
+    try {
+      await api(`/products/${p.id}`, { method: "DELETE" });
+      toast.success("Item excluído", p.name);
+      reload();
+    } catch (e) {
+      toast.error(e, "Não foi possível excluir");
+    }
   }
 
   const filtered = products.filter((p) => (!cat || p.category === cat) && (!search || p.name.toLowerCase().includes(search.toLowerCase())));
@@ -107,23 +149,26 @@ export default function EstoquePage() {
 
       {form && (
         <Modal title={form.id ? "Editar item" : "Novo item"} onClose={() => setForm(null)}
-          footer={<><button className="btn-ghost" onClick={() => setForm(null)}>Cancelar</button><button className="btn-primary" disabled={!form.name} onClick={save}>Salvar</button></>}>
+          footer={<><button className="btn-ghost" onClick={() => setForm(null)}>Cancelar</button><button className="btn-primary" onClick={save}>Salvar</button></>}>
           <ErrorBox message={formError} />
           <div className="grid gap-4 sm:grid-cols-4">
-            <Field label="Nome" className="sm:col-span-4"><input className="input" {...bind("name")} /></Field>
+            <Field label="Nome" className="sm:col-span-4" required error={errors.name}><input className="input" autoFocus {...bind("name")} /></Field>
             <Field label="Categoria" className="sm:col-span-2">
               <select className="input" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value, is_service: SERVICE_CATS.includes(e.target.value) })}>
                 {PRODUCT_CATEGORIES.map((c) => <option key={c}>{c}</option>)}
               </select>
             </Field>
             <Field label="Marca"><input className="input" {...bind("brand")} /></Field>
-            <Field label="Unidade"><input className="input" placeholder="un, m, kit, h, kWp" {...bind("unit")} /></Field>
-            <Field label="Preço de custo"><input className="input" type="number" step="0.01" {...bind("cost_price", "number")} /></Field>
-            <Field label="Preço de venda"><input className="input" type="number" step="0.01" {...bind("sale_price", "number")} /></Field>
+            <Field label="Unidade" required error={errors.unit}><input className="input" placeholder="un, m, kit, h, kWp" {...bind("unit")} /></Field>
+            <Field label="Preço de custo" error={errors.cost_price}><input className="input" type="number" min={0} step="0.01" {...bind("cost_price", "number")} /></Field>
+            <Field label="Preço de venda" error={errors.sale_price}
+              hint={form.cost_price > 0 && form.sale_price > 0 ? `Margem: ${num(((form.sale_price - form.cost_price) / form.sale_price) * 100, 1)}%` : undefined}>
+              <input className="input" type="number" min={0} step="0.01" {...bind("sale_price", "number")} />
+            </Field>
             {!form.is_service && (
               <>
-                <Field label="Estoque atual"><input className="input" type="number" step="any" {...bind("stock", "number")} /></Field>
-                <Field label="Estoque mínimo"><input className="input" type="number" step="any" {...bind("min_stock", "number")} /></Field>
+                <Field label="Estoque atual" error={errors.stock}><input className="input" type="number" min={0} step="any" {...bind("stock", "number")} /></Field>
+                <Field label="Estoque mínimo" error={errors.min_stock}><input className="input" type="number" min={0} step="any" {...bind("min_stock", "number")} /></Field>
               </>
             )}
             <label className="flex items-center gap-2 text-sm sm:col-span-4">

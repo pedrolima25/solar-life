@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import clsx from "clsx";
 import { ItemsEditor, itemsTotal, type Item, type Product } from "@/components/ItemsEditor";
+import { confirmDialog, focusFirstInvalid, toast } from "@/components/feedback";
 import { Badge, Empty, ErrorBox, Field, Loading, Modal, PageHeader, StatusBadge } from "@/components/ui";
 import { api } from "@/lib/api";
 import { CHECKLISTS, MEASUREMENT_FIELDS, OS_STATUS, PRIORITIES, SERVICE_TYPES } from "@/lib/constants";
@@ -92,11 +93,12 @@ function OSContent() {
     if (o.status === status) return;
     try {
       await api(`/orders/${o.id}/status`, { method: "PATCH", json: { status } });
+      toast.success(`OS #${o.number}: ${status}`);
       reload();
       const client = clients.find((c) => c.id === o.client_id);
       if (client?.phone) setNotify({ os: { ...o, client }, status });
-    } catch (e: any) {
-      alert(e.message);
+    } catch (e) {
+      toast.error(e, "Não foi possível mudar o status");
     }
   }
 
@@ -246,6 +248,20 @@ function OSModal({ form, setForm, clients, users, products, onSaved }: {
   }
 
   async function save() {
+    const p: string[] = [];
+    if (!form.client_id) p.push("Selecione o cliente (aba Dados).");
+    form.items.forEach((it, i) => {
+      if (!it.description?.trim()) p.push(`Item ${i + 1}: preencha a descrição.`);
+      if (!(Number(it.quantity) > 0)) p.push(`Item ${i + 1}: a quantidade deve ser maior que zero.`);
+      // O item "Desconto" criado na aprovação do orçamento é negativo de propósito
+      if (Number(it.unit_price) < 0 && it.description !== "Desconto") p.push(`Item ${i + 1}: o preço não pode ser negativo.`);
+    });
+    if (!(form.warranty_days >= 0)) p.push("A garantia não pode ser negativa.");
+    if (p.length) {
+      setError(p.length === 1 ? p[0] : `Confira antes de salvar: ${p.join(" · ")}`);
+      if (!form.client_id) setTab("dados");
+      return focusFirstInvalid();
+    }
     setSaving(true);
     setError("");
     try {
@@ -254,6 +270,7 @@ function OSModal({ form, setForm, clients, users, products, onSaved }: {
         method: id ? "PUT" : "POST",
         json: { ...body, scheduled_date: form.scheduled_date || null, installation_id: form.installation_id || null, technician_id: form.technician_id || null },
       });
+      toast.success(id ? `OS #${number} atualizada` : "Ordem de serviço criada");
       onSaved();
     } catch (e: any) {
       setError(e.message);
@@ -263,9 +280,15 @@ function OSModal({ form, setForm, clients, users, products, onSaved }: {
   }
 
   async function remove() {
-    if (!form.id || !confirm(`Excluir a OS #${form.number}?`)) return;
-    await api(`/orders/${form.id}`, { method: "DELETE" }).catch((e) => alert(e.message));
-    onSaved();
+    if (!form.id) return;
+    if (!(await confirmDialog({ title: `Excluir a OS #${form.number}?`, message: "Essa ação não pode ser desfeita.", danger: true, confirmText: "Excluir" }))) return;
+    try {
+      await api(`/orders/${form.id}`, { method: "DELETE" });
+      toast.success(`OS #${form.number} excluída`);
+      onSaved();
+    } catch (e) {
+      toast.error(e, "Não foi possível excluir");
+    }
   }
 
   const tabs = [{ id: "dados", label: "Dados" }, { id: "tecnico", label: "Técnico / Checklist" }, { id: "itens", label: `Itens (${form.items.length})` }] as const;
@@ -276,7 +299,7 @@ function OSModal({ form, setForm, clients, users, products, onSaved }: {
         {form.id && can("excluir") && <button className="btn-danger mr-auto" onClick={remove}><Trash2 className="h-4 w-4" /></button>}
         {form.id && <Link href={`/imprimir/os/${form.id}`} target="_blank" className="btn-ghost"><Printer className="h-4 w-4" /> Imprimir</Link>}
         <span className="self-center px-2 text-sm">Total: <b>{brl(itemsTotal(form.items))}</b></span>
-        <button className="btn-primary" disabled={saving || !form.client_id} onClick={save}>Salvar</button>
+        <button className="btn-primary" disabled={saving} onClick={save}>{saving ? "Salvando…" : "Salvar"}</button>
       </>}>
       <ErrorBox message={error} />
       <div className="mb-5 flex gap-1 rounded-xl bg-muted p-1">
@@ -290,7 +313,7 @@ function OSModal({ form, setForm, clients, users, products, onSaved }: {
 
       {tab === "dados" && (
         <div className="grid gap-4 sm:grid-cols-6">
-          <Field label="Cliente" className="sm:col-span-3">
+          <Field label="Cliente" className="sm:col-span-3" required error={error && !form.client_id ? "Selecione o cliente." : null}>
             <select className="input" value={form.client_id} onChange={(e) => selectClient(e.target.value)}>
               <option value="">Selecione...</option>
               {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}

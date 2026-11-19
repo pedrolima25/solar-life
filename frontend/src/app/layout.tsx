@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { FeedbackHost } from "@/components/feedback";
 import "./globals.css";
 
 export const viewport: Viewport = { width: "device-width", initialScale: 1, themeColor: "#0b1120" };
@@ -19,7 +20,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
-      <body className="font-sans antialiased">{children}</body>
+      <body className="font-sans antialiased">
+        {children}
+        <FeedbackHost />
+      </body>
     </html>
   );
 }

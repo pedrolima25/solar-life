@@ -1,6 +1,6 @@
 "use client";
 
-import { Loader2, X } from "lucide-react";
+import { AlertCircle, Loader2, X } from "lucide-react";
 import React, { useEffect } from "react";
 import clsx from "clsx";
 
@@ -53,11 +53,26 @@ export function Modal({
   );
 }
 
-export function Field({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
+export function Field({ label, children, className, error, required, hint }: {
+  label: string;
+  children: React.ReactNode;
+  className?: string;
+  /** Mensagem de validação: deixa o campo vermelho e mostra o texto embaixo. */
+  error?: string | null;
+  required?: boolean;
+  hint?: React.ReactNode;
+}) {
+  // Marca o campo (input/select/textarea) como inválido para o leitor de tela e para o estilo vermelho
+  const child = error && React.isValidElement(children)
+    ? React.cloneElement(children as React.ReactElement<any>, { "aria-invalid": true })
+    : children;
   return (
     <label className={clsx("block", className)}>
-      <span className="label">{label}</span>
-      {children}
+      <span className="label">{label}{required && <span className="ml-0.5 text-red-500" aria-hidden>*</span>}</span>
+      {child}
+      {error
+        ? <span className="mt-1 flex items-center gap-1 text-xs font-medium text-red-500"><AlertCircle className="h-3.5 w-3.5 shrink-0" />{error}</span>
+        : hint && <span className="mt-1 block text-xs text-muted-foreground">{hint}</span>}
     </label>
   );
 }
@@ -129,8 +144,16 @@ export function StatCard({
 }
 
 export function ErrorBox({ message }: { message?: string }) {
+  const ref = React.useRef<HTMLDivElement>(null);
+  // Garante que o erro apareça na tela mesmo com o formulário rolado para baixo
+  useEffect(() => { if (message) ref.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, [message]);
   if (!message) return null;
-  return <div className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-500">{message}</div>;
+  return (
+    <div ref={ref} role="alert" className="toast-in mb-4 flex items-start gap-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-400">
+      <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+      <span>{message}</span>
+    </div>
+  );
 }
 
 /** Atalho para inputs controlados por objeto de formulário. */

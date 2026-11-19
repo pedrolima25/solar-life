@@ -1,9 +1,11 @@
 "use client";
 
 import { Check, ChevronLeft, ChevronRight, Pencil, Plus, Trash2, TrendingDown, TrendingUp, Wallet } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import clsx from "clsx";
+import { confirmDialog, focusFirstInvalid, toast } from "@/components/feedback";
 import { Badge, Empty, ErrorBox, Field, Loading, Modal, PageHeader, StatCard } from "@/components/ui";
+import { hasErrors, rules, validate } from "@/lib/validation";
 import { api } from "@/lib/api";
 import { FINANCE_CATEGORIES, PAYMENT_METHODS } from "@/lib/constants";
 import { brl, date, parseDate, todayISO } from "@/lib/format";
@@ -34,14 +36,25 @@ export default function FinanceiroPage() {
   const toPay = sum((e) => e.kind === "despesa" && !e.paid);
   const today = parseDate(todayISO())!;
 
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  useEffect(() => { if (!form) { setErrors({}); setFormError(""); } }, [form]);
+
   async function save() {
+    const e = validate(form, {
+      description: [rules.required("Descrição")],
+      amount: [rules.positive("Valor")],
+      due_date: [rules.required("Vencimento")],
+    }) as Record<string, string>;
+    setErrors(e);
+    if (hasErrors(e)) return focusFirstInvalid();
     setFormError("");
     try {
       const { id, client, os_id, quote_id, ...body } = form;
       await api(id ? `/finance/${id}` : "/finance", {
         method: id ? "PUT" : "POST",
-        json: { ...body, client_id: body.client_id || null, paid_date: body.paid_date || null },
+        json: { ...body, client_id: body.client_id || null, paid_date: body.paid ? body.paid_date || todayISO() : null },
       });
+      toast.success(id ? "Lançamento atualizado" : `${form.kind === "receita" ? "Receita" : "Despesa"} lançada`, `${form.description} · ${brl(form.amount)}`);
       setForm(null);
       reload();
     } catch (e: any) {
@@ -51,14 +64,24 @@ export default function FinanceiroPage() {
 
   async function togglePaid(e: any) {
     const { id, client, os_id, quote_id, ...body } = e;
-    await api(`/finance/${id}`, { method: "PUT", json: { ...body, paid: !e.paid, paid_date: !e.paid ? todayISO() : null } });
-    reload();
+    try {
+      await api(`/finance/${id}`, { method: "PUT", json: { ...body, paid: !e.paid, paid_date: !e.paid ? todayISO() : null } });
+      toast.success(!e.paid ? (e.kind === "receita" ? "Marcado como recebido" : "Marcado como pago") : "Marcado como em aberto", `${e.description} · ${brl(e.amount)}`);
+      reload();
+    } catch (err) {
+      toast.error(err, "Não foi possível atualizar");
+    }
   }
 
   async function remove(e: any) {
-    if (!confirm(`Excluir "${e.description}"?`)) return;
-    await api(`/finance/${e.id}`, { method: "DELETE" });
-    reload();
+    if (!(await confirmDialog({ title: `Excluir "${e.description}"?`, message: `${brl(e.amount)} · vencimento ${date(e.due_date)}. Essa ação não pode ser desfeita.`, danger: true, confirmText: "Excluir" }))) return;
+    try {
+      await api(`/finance/${e.id}`, { method: "DELETE" });
+      toast.success("Lançamento excluído", e.description);
+      reload();
+    } catch (err) {
+      toast.error(err, "Não foi possível excluir");
+    }
   }
 
   const newEntry = (k: "receita" | "despesa") => setForm({
@@ -129,17 +152,17 @@ export default function FinanceiroPage() {
       {form && (
         <Modal title={`${form.id ? "Editar" : "Nova"} ${form.kind === "receita" ? "receita" : "despesa"}`} onClose={() => setForm(null)}
           footer={<><button className="btn-ghost" onClick={() => setForm(null)}>Cancelar</button>
-            <button className="btn-primary" disabled={!form.description || !form.amount} onClick={save}>Salvar</button></>}>
+            <button className="btn-primary" onClick={save}>Salvar</button></>}>
           <ErrorBox message={formError} />
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Descrição" className="sm:col-span-2"><input className="input" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
+            <Field label="Descrição" className="sm:col-span-2" required error={errors.description}><input autoFocus className="input" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
             <Field label="Categoria">
               <select className="input" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
                 {FINANCE_CATEGORIES[form.kind as "receita" | "despesa"].map((c) => <option key={c}>{c}</option>)}
               </select>
             </Field>
-            <Field label="Valor (R$)"><input className="input" type="number" step="0.01" value={form.amount} onChange={(e) => setForm({ ...form, amount: Number(e.target.value) })} /></Field>
-            <Field label="Vencimento"><input className="input" type="date" value={form.due_date} onChange={(e) => setForm({ ...form, due_date: e.target.value })} /></Field>
+            <Field label="Valor (R$)" required error={errors.amount}><input className="input" type="number" min={0} step="0.01" value={form.amount} onChange={(e) => setForm({ ...form, amount: Number(e.target.value) })} /></Field>
+            <Field label="Vencimento" required error={errors.due_date}><input className="input" type="date" value={form.due_date} onChange={(e) => setForm({ ...form, due_date: e.target.value })} /></Field>
             <Field label="Forma de pagamento">
               <select className="input" value={form.payment_method ?? ""} onChange={(e) => setForm({ ...form, payment_method: e.target.value })}>
                 <option value="">—</option>{PAYMENT_METHODS.map((m) => <option key={m}>{m}</option>)}

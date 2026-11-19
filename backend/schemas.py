@@ -1,7 +1,10 @@
 import datetime as dt
+import re
 from typing import Any, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+import validators as v
 
 
 class ORM(BaseModel):
@@ -20,12 +23,28 @@ class LoginIn(BaseModel):
 
 
 class UserIn(BaseModel):
-    name: str
+    name: str = Field(min_length=1)
     email: str
     phone: Optional[str] = None
-    role: str = "tecnico"
+    role: str = Field("tecnico", pattern="^(admin|vendedor|tecnico)$")
     active: bool = True
     password: Optional[str] = None
+
+    _phone = field_validator("phone")(v.opt_phone)
+
+    @field_validator("email")
+    @classmethod
+    def _email(cls, x: str) -> str:
+        if not v.opt_email(x):
+            raise ValueError("Informe um e-mail válido.")
+        return x.strip().lower()
+
+    @field_validator("password")
+    @classmethod
+    def _password(cls, x: Optional[str]) -> Optional[str]:
+        if x and len(x) < 8:
+            raise ValueError("A senha deve ter pelo menos 8 caracteres.")
+        return x or None
 
 
 class UserOut(ORM):
@@ -38,7 +57,8 @@ class UserOut(ORM):
 
 
 # ── Empresa ─────────────────────────────────────────────────────
-class CompanyIn(BaseModel):
+class CompanyBase(BaseModel):
+    """Campos da empresa sem regras (usado na resposta, para dados antigos nunca quebrarem a leitura)."""
     name: str
     cnpj: Optional[str] = None
     phone: Optional[str] = None
@@ -58,12 +78,25 @@ class CompanyIn(BaseModel):
     custo_bateria_kwh: float = 2800.0
 
 
-class CompanyOut(CompanyIn, ORM):
+class CompanyIn(CompanyBase):
+    name: str = Field(min_length=1)
+    tarifa_kwh: float = Field(0.95, gt=0)
+    hsp_padrao: float = Field(5.0, gt=0, le=8)
+    custo_kwp: float = Field(3800.0, gt=0)
+    potencia_modulo_w: int = Field(550, gt=0)
+    custo_bateria_kwh: float = Field(2800.0, ge=0)
+
+    _cnpj = field_validator("cnpj")(v.opt_cnpj)
+    _phone = field_validator("phone")(v.opt_phone)
+    _email = field_validator("email")(v.opt_email)
+
+
+class CompanyOut(CompanyBase, ORM):
     id: str
 
 
 # ── Clientes ────────────────────────────────────────────────────
-class ClientIn(BaseModel):
+class ClientBase(BaseModel):
     name: str
     person_type: str = "PF"
     document: Optional[str] = None
@@ -78,7 +111,41 @@ class ClientIn(BaseModel):
     notes: Optional[str] = None
 
 
-class ClientOut(ClientIn, ORM):
+class ClientIn(ClientBase):
+    person_type: str = Field("PF", pattern="^(PF|PJ)$")
+
+    _phone = field_validator("phone")(v.opt_phone)
+    _email = field_validator("email")(v.opt_email)
+    _cep = field_validator("cep")(v.opt_cep)
+
+    @field_validator("name")
+    @classmethod
+    def _name(cls, x: str) -> str:
+        if not x.strip():
+            raise ValueError("Informe o nome do cliente.")
+        return x.strip()
+
+    @field_validator("state")
+    @classmethod
+    def _uf(cls, x: Optional[str]) -> Optional[str]:
+        if not x or not x.strip():
+            return None
+        if not re.fullmatch(r"[A-Za-z]{2}", x.strip()):
+            raise ValueError("UF deve ter 2 letras (ex.: RR).")
+        return x.strip().upper()
+
+    @model_validator(mode="after")
+    def _documento(self):
+        if self.document and self.document.strip():
+            pj = self.person_type == "PJ"
+            if not (v.cnpj_ok if pj else v.cpf_ok)(self.document):
+                raise ValueError("CNPJ inválido." if pj else "CPF inválido.")
+        else:
+            self.document = None
+        return self
+
+
+class ClientOut(ClientBase, ORM):
     id: str
     created_at: Optional[dt.datetime] = None
 
@@ -115,7 +182,7 @@ class InstallationOut(InstallationIn, ORM):
 
 
 # ── Produtos / estoque ──────────────────────────────────────────
-class ProductIn(BaseModel):
+class ProductBase(BaseModel):
     name: str
     category: str = "Material Elétrico"
     brand: Optional[str] = None
@@ -127,7 +194,18 @@ class ProductIn(BaseModel):
     is_service: bool = False
 
 
-class ProductOut(ProductIn, ORM):
+class ProductIn(ProductBase):
+    _nome = field_validator("name", "unit")(v.required)
+
+    @model_validator(mode="after")
+    def _precos(self):
+        for campo, label in (("cost_price", "Preço de custo"), ("sale_price", "Preço de venda"), ("min_stock", "Estoque mínimo")):
+            if (getattr(self, campo) or 0) < 0:
+                raise ValueError(f"{label} não pode ser negativo.")
+        return self
+
+
+class ProductOut(ProductBase, ORM):
     id: str
 
 
@@ -147,7 +225,7 @@ class BrandOut(BrandIn, ORM):
 
 
 # ── Itens (orçamento / OS) ──────────────────────────────────────
-class ItemIn(BaseModel):
+class ItemBase(BaseModel):
     product_id: Optional[str] = None
     description: str
     quantity: float = 1
@@ -156,7 +234,20 @@ class ItemIn(BaseModel):
     qty_label: Optional[str] = None
 
 
-class ItemOut(ItemIn, ORM):
+class ItemIn(ItemBase):
+    _desc = field_validator("description")(v.required)
+
+    @model_validator(mode="after")
+    def _valores(self):
+        if not (self.quantity or 0) > 0:
+            raise ValueError(f"Item “{self.description}”: a quantidade deve ser maior que zero.")
+        # "Desconto"/"Ajuste de valor" são criados na aprovação do orçamento e podem ser negativos
+        if (self.unit_price or 0) < 0 and self.description not in ("Desconto", "Ajuste de valor"):
+            raise ValueError(f"Item “{self.description}”: o preço não pode ser negativo.")
+        return self
+
+
+class ItemOut(ItemBase, ORM):
     id: str
 
 
@@ -168,10 +259,10 @@ class QuoteIn(BaseModel):
     service_type: str = "Instalação Solar"
     status: str = "Rascunho"
     sizing: Optional[dict] = None
-    discount: float = 0
+    discount: float = Field(0, ge=0)
     valor_investimento: Optional[float] = Field(None, gt=0)  # vazio = soma dos itens − desconto
     payment_terms: Optional[str] = None
-    validity_days: int = 15
+    validity_days: int = Field(15, ge=1, le=365)
     notes: Optional[str] = None
     local_instalacao: Optional[str] = None
     potencia_kwp: Optional[float] = None
@@ -219,7 +310,7 @@ class QuoteOut(ORM):
 class ApproveIn(BaseModel):
     create_os: bool = True
     create_receivable: bool = True
-    installments: int = 1
+    installments: int = Field(1, ge=1, le=60)
     first_due: Optional[dt.date] = None
 
 
@@ -238,7 +329,7 @@ class ServiceOrderIn(BaseModel):
     solution: Optional[str] = None
     checklist: Optional[List[dict]] = None
     measurements: Optional[dict] = None
-    warranty_days: int = 90
+    warranty_days: int = Field(90, ge=0)
     art_number: Optional[str] = None
     items: List[ItemIn] = []
 
@@ -278,7 +369,7 @@ class StatusIn(BaseModel):
 
 
 # ── Manutenção ──────────────────────────────────────────────────
-class PlanIn(BaseModel):
+class PlanBase(BaseModel):
     client_id: str
     installation_id: Optional[str] = None
     title: str
@@ -290,7 +381,13 @@ class PlanIn(BaseModel):
     notes: Optional[str] = None
 
 
-class PlanOut(PlanIn, ORM):
+class PlanIn(PlanBase):
+    _title = field_validator("title")(v.required)
+    frequency_months: int = Field(6, ge=1, le=60)
+    value: float = Field(0, ge=0)
+
+
+class PlanOut(PlanBase, ORM):
     id: str
     last_date: Optional[dt.date] = None
     client: Optional[Ref] = None
@@ -298,7 +395,7 @@ class PlanOut(PlanIn, ORM):
 
 
 # ── Agenda ──────────────────────────────────────────────────────
-class AppointmentIn(BaseModel):
+class AppointmentBase(BaseModel):
     title: str
     type: str = "Visita Técnica"
     client_id: Optional[str] = None
@@ -310,14 +407,19 @@ class AppointmentIn(BaseModel):
     notes: Optional[str] = None
 
 
-class AppointmentOut(AppointmentIn, ORM):
+class AppointmentIn(AppointmentBase):
+    _title = field_validator("title")(v.required)
+    duration_min: int = Field(60, gt=0, le=24 * 60)
+
+
+class AppointmentOut(AppointmentBase, ORM):
     id: str
     client: Optional[Ref] = None
     technician: Optional[Ref] = None
 
 
 # ── Financeiro ──────────────────────────────────────────────────
-class FinanceIn(BaseModel):
+class FinanceBase(BaseModel):
     kind: str
     description: str
     category: str = "Serviços"
@@ -329,7 +431,13 @@ class FinanceIn(BaseModel):
     client_id: Optional[str] = None
 
 
-class FinanceOut(FinanceIn, ORM):
+class FinanceIn(FinanceBase):
+    _desc = field_validator("description")(v.required)
+    kind: str = Field(pattern="^(receita|despesa)$")
+    amount: float = Field(gt=0)
+
+
+class FinanceOut(FinanceBase, ORM):
     id: str
     os_id: Optional[str] = None
     quote_id: Optional[str] = None

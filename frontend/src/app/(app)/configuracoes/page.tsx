@@ -3,7 +3,9 @@
 import { Check } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { Brand } from "@/components/Sizing";
+import { focusFirstInvalid, toast } from "@/components/feedback";
 import { ErrorBox, Field, Loading, PageHeader, useFormBinder } from "@/components/ui";
+import { hasErrors, maskCNPJ, maskPhone, rules, validate } from "@/lib/validation";
 import { api } from "@/lib/api";
 import { useApi } from "@/lib/hooks";
 import { DEFAULT_LOGO, MESES } from "@/lib/proposal";
@@ -17,15 +19,31 @@ export default function ConfiguracoesPage() {
 
   useEffect(() => { if (data) setForm(data); }, [data]);
 
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
   async function save() {
+    const e = validate(form, {
+      name: [rules.required("Nome da empresa")],
+      cnpj: [rules.cnpj()],
+      email: [rules.email()],
+      phone: [rules.phone()],
+      tarifa_kwh: [rules.positive("Tarifa")],
+      hsp_padrao: [rules.positive("HSP"), (v) => (Number(v) > 8 ? "HSP acima de 8 h/dia não é realista." : null)],
+      custo_kwp: [rules.positive("Preço por kWp")],
+      potencia_modulo_w: [rules.positive("Potência do módulo")],
+    }) as Record<string, string>;
+    setErrors(e);
+    if (hasErrors(e)) { focusFirstInvalid(); return toast.warning("Confira os campos destacados", "Nada foi salvo ainda."); }
     setSaveError("");
     try {
       const { id, ...body } = form;
       await api("/company", { method: "PUT", json: body });
       setSaved(true);
+      toast.success("Configurações salvas");
       setTimeout(() => setSaved(false), 2500);
     } catch (e: any) {
       setSaveError(e.message);
+      toast.error(e, "Não foi possível salvar");
     }
   }
 
@@ -55,10 +73,10 @@ export default function ConfiguracoesPage() {
           <h2 className="mb-4 font-semibold">Empresa</h2>
           <p className="mb-4 text-sm text-muted-foreground">Aparece no cabeçalho dos orçamentos e das ordens de serviço impressas.</p>
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Nome / Razão social" className="sm:col-span-2"><input className="input" {...bind("name")} /></Field>
-            <Field label="CNPJ"><input className="input" {...bind("cnpj")} /></Field>
-            <Field label="Telefone / WhatsApp"><input className="input" {...bind("phone")} /></Field>
-            <Field label="E-mail" className="sm:col-span-2"><input className="input" {...bind("email")} /></Field>
+            <Field label="Nome / Razão social" className="sm:col-span-2" required error={errors.name}><input className="input" {...bind("name")} /></Field>
+            <Field label="CNPJ" error={errors.cnpj}><input className="input" inputMode="numeric" placeholder="00.000.000/0000-00" value={form.cnpj ?? ""} onChange={(e) => setForm({ ...form, cnpj: maskCNPJ(e.target.value) })} /></Field>
+            <Field label="Telefone / WhatsApp" error={errors.phone}><input className="input" inputMode="tel" placeholder="(95) 99999-9999" value={form.phone ?? ""} onChange={(e) => setForm({ ...form, phone: maskPhone(e.target.value) })} /></Field>
+            <Field label="E-mail" className="sm:col-span-2" error={errors.email}><input className="input" type="email" {...bind("email")} /></Field>
             <Field label="Endereço" className="sm:col-span-2"><input className="input" {...bind("address")} /></Field>
             <Field label="Responsável técnico"><input className="input" {...bind("responsavel_tecnico")} /></Field>
             <Field label="CREA / CFT"><input className="input" {...bind("crea")} /></Field>
@@ -79,10 +97,10 @@ export default function ConfiguracoesPage() {
           <h2 className="mb-4 font-semibold">Padrões do dimensionamento</h2>
           <p className="mb-4 text-sm text-muted-foreground">Valores usados no simulador quando o campo fica em branco.</p>
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Tarifa de energia (R$/kWh)"><input className="input" type="number" step="0.01" {...bind("tarifa_kwh", "number")} /></Field>
-            <Field label="HSP da região (h/dia)"><input className="input" type="number" step="0.1" {...bind("hsp_padrao", "number")} /></Field>
-            <Field label="Preço de venda por kWp (R$)"><input className="input" type="number" {...bind("custo_kwp", "number")} /></Field>
-            <Field label="Potência do módulo padrão (W)"><input className="input" type="number" {...bind("potencia_modulo_w", "number")} /></Field>
+            <Field label="Tarifa de energia (R$/kWh)" error={errors.tarifa_kwh}><input className="input" type="number" min={0} step="0.01" {...bind("tarifa_kwh", "number")} /></Field>
+            <Field label="HSP da região (h/dia)" error={errors.hsp_padrao}><input className="input" type="number" min={0} max={8} step="0.1" {...bind("hsp_padrao", "number")} /></Field>
+            <Field label="Preço de venda por kWp (R$)" error={errors.custo_kwp}><input className="input" type="number" min={0} {...bind("custo_kwp", "number")} /></Field>
+            <Field label="Potência do módulo padrão (W)" error={errors.potencia_modulo_w}><input className="input" type="number" min={0} {...bind("potencia_modulo_w", "number")} /></Field>
             <Field label="Preço de venda por kWh de bateria de lítio (R$)" className="sm:col-span-2"><input className="input" type="number" {...bind("custo_bateria_kwh", "number")} /></Field>
           </div>
           <p className="mt-4 text-xs text-muted-foreground">

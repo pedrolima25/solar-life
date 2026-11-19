@@ -2,8 +2,10 @@
 
 import { Pencil, Plus, RefreshCw, Trash2, Wrench } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { confirmDialog, focusFirstInvalid, toast } from "@/components/feedback";
 import { Badge, Empty, ErrorBox, Field, Loading, Modal, PageHeader, useFormBinder } from "@/components/ui";
+import { hasErrors, rules, validate } from "@/lib/validation";
 import { api } from "@/lib/api";
 import { SERVICE_TYPES } from "@/lib/constants";
 import { brl, date, parseDate, todayISO } from "@/lib/format";
@@ -24,11 +26,23 @@ export default function ManutencaoPage() {
   const bind = useFormBinder(form ?? {}, setForm);
   const { data: installations = [] } = useApi<any[]>(form?.client_id ? `/installations?client_id=${form.client_id}` : null, []);
 
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  useEffect(() => { if (!form) { setErrors({}); setFormError(""); } }, [form]);
+
   async function save() {
+    const e = validate(form, {
+      client_id: [rules.required("Cliente")],
+      title: [rules.required("Título")],
+      value: [rules.min(0, "Valor")],
+      next_date: [rules.required("Próxima data")],
+    }) as Record<string, string>;
+    setErrors(e);
+    if (hasErrors(e)) return focusFirstInvalid();
     setFormError("");
     try {
       const { id, client, installation, last_date, ...body } = form;
       await api(id ? `/plans/${id}` : "/plans", { method: id ? "PUT" : "POST", json: { ...body, installation_id: body.installation_id || null } });
+      toast.success(id ? "Plano atualizado" : "Plano de manutenção criado", form.title);
       setForm(null);
       reload();
     } catch (e: any) {
@@ -40,16 +54,22 @@ export default function ManutencaoPage() {
     try {
       const os = await api(`/plans/${p.id}/generate-os`, { method: "POST" });
       setGenerated(os);
+      toast.success(`OS #${os.number} gerada`, p.title);
       reload();
-    } catch (e: any) {
-      alert(e.message);
+    } catch (e) {
+      toast.error(e, "Não foi possível gerar a OS");
     }
   }
 
   async function remove(p: any) {
-    if (!confirm(`Excluir o plano "${p.title}"?`)) return;
-    await api(`/plans/${p.id}`, { method: "DELETE" });
-    reload();
+    if (!(await confirmDialog({ title: `Excluir o plano "${p.title}"?`, message: "As OS já geradas continuam no sistema.", danger: true, confirmText: "Excluir" }))) return;
+    try {
+      await api(`/plans/${p.id}`, { method: "DELETE" });
+      toast.success("Plano excluído", p.title);
+      reload();
+    } catch (e) {
+      toast.error(e, "Não foi possível excluir");
+    }
   }
 
   const today = parseDate(todayISO())!;
@@ -108,10 +128,10 @@ export default function ManutencaoPage() {
       {form && (
         <Modal title={form.id ? "Editar plano" : "Novo plano de manutenção"} onClose={() => setForm(null)}
           footer={<><button className="btn-ghost" onClick={() => setForm(null)}>Cancelar</button>
-            <button className="btn-primary" disabled={!form.client_id || !form.title} onClick={save}>Salvar</button></>}>
+            <button className="btn-primary" onClick={save}>Salvar</button></>}>
           <ErrorBox message={formError} />
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Cliente">
+            <Field label="Cliente" required error={errors.client_id}>
               <select className="input" value={form.client_id} onChange={(e) => setForm({ ...form, client_id: e.target.value, installation_id: null })}>
                 <option value="">Selecione...</option>
                 {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -123,15 +143,15 @@ export default function ManutencaoPage() {
                 {installations.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
               </select>
             </Field>
-            <Field label="Título" className="sm:col-span-2"><input className="input" {...bind("title")} /></Field>
+            <Field label="Título" className="sm:col-span-2" required error={errors.title}><input className="input" {...bind("title")} /></Field>
             <Field label="Tipo de serviço"><select className="input" {...bind("service_type")}>{SERVICE_TYPES.map((t) => <option key={t}>{t}</option>)}</select></Field>
             <Field label="Frequência">
               <select className="input" {...bind("frequency_months", "number")}>
                 {[1, 2, 3, 4, 6, 12].map((m) => <option key={m} value={m}>{m === 1 ? "Mensal" : m === 12 ? "Anual" : `A cada ${m} meses`}</option>)}
               </select>
             </Field>
-            <Field label="Valor por visita (R$)"><input className="input" type="number" step="0.01" {...bind("value", "number")} /></Field>
-            <Field label="Próxima data"><input className="input" type="date" {...bind("next_date")} /></Field>
+            <Field label="Valor por visita (R$)" error={errors.value}><input className="input" type="number" min={0} step="0.01" {...bind("value", "number")} /></Field>
+            <Field label="Próxima data" required error={errors.next_date}><input className="input" type="date" {...bind("next_date")} /></Field>
             <Field label="Observações" className="sm:col-span-2"><textarea className="input" rows={2} {...bind("notes")} /></Field>
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> Plano ativo</label>
           </div>

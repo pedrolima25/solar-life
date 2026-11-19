@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { ItemsEditor, itemsTotal, type Item, type Product } from "@/components/ItemsEditor";
 import { EMPTY_SIZING, SizingForm, SizingResult, sizingInputFrom, suggestItems, type SizingInput } from "@/components/Sizing";
+import { confirmDialog, copyText, focusFirstInvalid, toast } from "@/components/feedback";
 import { Empty, ErrorBox, Field, Loading, Modal, PageHeader, StatusBadge } from "@/components/ui";
 import { api } from "@/lib/api";
 import { QUOTE_STATUS, SERVICE_TYPES } from "@/lib/constants";
@@ -85,9 +86,18 @@ function OrcamentosContent() {
   }
 
   async function remove(q: any) {
-    if (!confirm(`Excluir o orçamento #${q.number}?`)) return;
-    await api(`/quotes/${q.id}`, { method: "DELETE" }).catch((e) => alert(e.message));
-    reload();
+    const ok = await confirmDialog({
+      title: `Excluir o orçamento #${q.number}?`, danger: true, confirmText: "Excluir",
+      message: `${q.client?.name ?? ""} · ${brl(q.total)}. Essa ação não pode ser desfeita e o link enviado ao cliente deixa de funcionar.`,
+    });
+    if (!ok) return;
+    try {
+      await api(`/quotes/${q.id}`, { method: "DELETE" });
+      toast.success(`Orçamento #${q.number} excluído`);
+      reload();
+    } catch (e) {
+      toast.error(e, "Não foi possível excluir");
+    }
   }
 
   /** Gera (ou reaproveita) o link público da apresentação deste orçamento. */
@@ -111,29 +121,36 @@ ${link}
 Qualquer dúvida, estou à disposição!`;
       const wa = whatsappLink(client?.phone, msg);
       if (wa && win) win.location.href = wa;
-      else { win?.close(); await navigator.clipboard?.writeText(link); alert("Cliente sem telefone. Link copiado:\n" + link); }
+      else {
+        win?.close();
+        await copyText(link, "Cliente sem telefone válido", "O link da proposta foi copiado. Cadastre o WhatsApp do cliente para enviar direto.");
+      }
       reload();
-    } catch (e: any) {
+    } catch (e) {
       win?.close();
-      alert(e.message);
+      toast.error(e, "Não foi possível gerar o link");
     }
   }
 
   async function copyLink(q: any) {
     try {
       const link = await shareLink(q);
-      try { await navigator.clipboard.writeText(link); alert("Link copiado! Cole no WhatsApp ou e-mail do cliente:\n\n" + link); }
-      catch { prompt("Copie o link da proposta:", link); }
+      await copyText(link, "Link copiado!", "Cole no WhatsApp ou e-mail do cliente.");
       reload();
-    } catch (e: any) {
-      alert(e.message);
+    } catch (e) {
+      toast.error(e, "Não foi possível gerar o link");
     }
   }
 
   async function setStatus(q: any, status: string) {
     const body = { ...q, status, items: q.items };
-    await api(`/quotes/${q.id}`, { method: "PUT", json: body }).catch((e) => alert(e.message));
-    reload();
+    try {
+      await api(`/quotes/${q.id}`, { method: "PUT", json: body });
+      toast.success(`Orçamento #${q.number}: ${status}`);
+      reload();
+    } catch (e) {
+      toast.error(e, "Não foi possível mudar o status");
+    }
   }
 
   return (
@@ -222,7 +239,30 @@ function QuoteModal({ form, setForm, clients, products, onSaved }: {
   const kwpItens = kwpFromItems(form.items);
   const client = clients.find((c) => c.id === form.client_id);
 
+  /** Confere o orçamento antes de enviar; devolve a lista de problemas (vazia = ok). */
+  function problemas(): string[] {
+    const p: string[] = [];
+    if (!form.client_id) p.push("Selecione o cliente.");
+    if (form.items.length === 0) p.push("Adicione pelo menos um item ou serviço.");
+    form.items.forEach((it, i) => {
+      const n = `Item ${i + 1}`;
+      if (!it.description?.trim()) p.push(`${n}: preencha a descrição.`);
+      if (!(Number(it.quantity) > 0)) p.push(`${n}${it.description ? ` (${it.description})` : ""}: a quantidade deve ser maior que zero.`);
+      if (Number(it.unit_price) < 0) p.push(`${n}${it.description ? ` (${it.description})` : ""}: o preço não pode ser negativo.`);
+    });
+    if ((form.discount || 0) < 0) p.push("O desconto não pode ser negativo.");
+    if (!form.valor_investimento && (form.discount || 0) > subtotal) p.push("O desconto é maior que a soma dos itens.");
+    if (!(form.validity_days >= 1)) p.push("A validade deve ser de pelo menos 1 dia.");
+    if (isSolar && form.sizingInput.consumo_kwh && !form.sizing) p.push("O dimensionamento solar tem um erro: confira os campos destacados acima.");
+    return p;
+  }
+
   async function save() {
+    const p = problemas();
+    if (p.length) {
+      setError(p.length === 1 ? p[0] : `Confira antes de salvar: ${p.join(" · ")}`);
+      return focusFirstInvalid();
+    }
     setSaving(true);
     setError("");
     try {
@@ -231,6 +271,7 @@ function QuoteModal({ form, setForm, clients, products, onSaved }: {
         method: id ? "PUT" : "POST",
         json: { ...body, sizing: isSolar ? form.sizing : null, installation_id: form.installation_id || null },
       });
+      toast.success(id ? "Orçamento atualizado" : "Orçamento criado", `${client?.name ?? ""} · ${brl(total)}`);
       onSaved();
     } catch (e: any) {
       setError(e.message);
@@ -244,12 +285,12 @@ function QuoteModal({ form, setForm, clients, products, onSaved }: {
       footer={<>
         <span className="mr-auto self-center text-sm">Total: <b className="text-lg">{brl(total)}</b></span>
         <button className="btn-ghost" onClick={() => setForm(null)}>Cancelar</button>
-        <button className="btn-primary" disabled={saving || !form.client_id || form.items.length === 0} onClick={save}>Salvar orçamento</button>
+        <button className="btn-primary" disabled={saving} onClick={save}>{saving ? "Salvando…" : "Salvar orçamento"}</button>
       </>}>
       <ErrorBox message={error} />
       <div className="space-y-6">
         <div className="grid gap-4 sm:grid-cols-3">
-          <Field label="Cliente">
+          <Field label="Cliente" required error={error && !form.client_id ? "Selecione o cliente." : null}>
             <select className="input" value={form.client_id} onChange={(e) => set({ client_id: e.target.value, installation_id: null })}>
               <option value="">Selecione...</option>
               {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -337,11 +378,16 @@ function ApproveModal({ quote, onClose, onDone }: { quote: any; onClose: () => v
   const [error, setError] = useState("");
 
   async function approve() {
+    if (createReceivable && !(installments >= 1 && installments <= 60)) return setError("Parcelas: de 1 a 60.");
+    if (createReceivable && !firstDue) return setError("Informe a data do 1º vencimento.");
+    setError("");
     try {
       await api(`/quotes/${quote.id}/approve`, {
         method: "POST",
         json: { create_os: createOs, create_receivable: createReceivable, installments, first_due: firstDue },
       });
+      toast.success(`Orçamento #${quote.number} aprovado`,
+        [createOs && "OS gerada", createReceivable && `${installments}x lançada(s) no financeiro`].filter(Boolean).join(" · ") || undefined);
       onDone();
     } catch (e: any) {
       setError(e.message);

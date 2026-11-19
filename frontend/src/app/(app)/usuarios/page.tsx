@@ -1,8 +1,10 @@
 "use client";
 
 import { Pencil, Plus, UserCog } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { focusFirstInvalid, toast } from "@/components/feedback";
 import { Badge, Empty, ErrorBox, Field, Loading, Modal, PageHeader } from "@/components/ui";
+import { hasErrors, maskPhone, rules, validate } from "@/lib/validation";
 import { api } from "@/lib/api";
 import { ROLES } from "@/lib/constants";
 import { useApi } from "@/lib/hooks";
@@ -12,11 +14,23 @@ export default function UsuariosPage() {
   const [form, setForm] = useState<any>(null);
   const [formError, setFormError] = useState("");
 
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  useEffect(() => { if (!form) { setErrors({}); setFormError(""); } }, [form]);
+
   async function save() {
+    const e = validate(form, {
+      name: [rules.required("Nome")],
+      email: [rules.required("E-mail"), rules.email()],
+      phone: [rules.phone()],
+      password: form.id ? [rules.minLength(8, "A senha")] : [rules.required("Senha"), rules.minLength(8, "A senha")],
+    }) as Record<string, string>;
+    setErrors(e);
+    if (hasErrors(e)) return focusFirstInvalid();
     setFormError("");
     try {
       const { id, ...body } = form;
-      await api(id ? `/users/${id}` : "/users", { method: id ? "PUT" : "POST", json: { ...body, password: body.password || null } });
+      await api(id ? `/users/${id}` : "/users", { method: id ? "PUT" : "POST", json: { ...body, email: body.email.trim().toLowerCase(), password: body.password || null } });
+      toast.success(id ? "Usuário atualizado" : "Usuário criado", `${form.name} · ${form.email}`);
       setForm(null);
       reload();
     } catch (e: any) {
@@ -56,19 +70,20 @@ export default function UsuariosPage() {
       {form && (
         <Modal title={form.id ? "Editar usuário" : "Novo usuário"} onClose={() => setForm(null)} size="md"
           footer={<><button className="btn-ghost" onClick={() => setForm(null)}>Cancelar</button>
-            <button className="btn-primary" disabled={!form.name || !form.email || (!form.id && !form.password)} onClick={save}>Salvar</button></>}>
+            <button className="btn-primary" onClick={save}>Salvar</button></>}>
           <ErrorBox message={formError} />
           <div className="space-y-4">
-            <Field label="Nome"><input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
-            <Field label="E-mail (login)"><input className="input" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
-            <Field label="Telefone"><input className="input" value={form.phone ?? ""} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></Field>
+            <Field label="Nome" required error={errors.name}><input className="input" autoFocus value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
+            <Field label="E-mail (login)" required error={errors.email}><input className="input" type="email" autoComplete="off" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
+            <Field label="Telefone" error={errors.phone}><input className="input" inputMode="tel" placeholder="(95) 99999-9999" value={form.phone ?? ""} onChange={(e) => setForm({ ...form, phone: maskPhone(e.target.value) })} /></Field>
             <Field label="Função">
               <select className="input" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
                 {Object.entries(ROLES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
               </select>
             </Field>
-            <Field label={form.id ? "Nova senha (deixe em branco para manter)" : "Senha"}>
-              <input className="input" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+            <Field label={form.id ? "Nova senha (deixe em branco para manter)" : "Senha"} required={!form.id} error={errors.password}
+              hint="Mínimo de 8 caracteres.">
+              <input className="input" type="password" autoComplete="new-password" value={form.password ?? ""} onChange={(e) => setForm({ ...form, password: e.target.value })} />
             </Field>
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> Usuário ativo</label>
           </div>

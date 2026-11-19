@@ -1,9 +1,11 @@
 "use client";
 
 import { ChevronLeft, ChevronRight, Plus, Trash2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import clsx from "clsx";
+import { confirmDialog, focusFirstInvalid, toast } from "@/components/feedback";
 import { ErrorBox, Field, Loading, Modal, PageHeader } from "@/components/ui";
+import { hasErrors, rules, validate } from "@/lib/validation";
 import { api } from "@/lib/api";
 import { APPOINTMENT_TYPES } from "@/lib/constants";
 import { can } from "@/lib/permissions";
@@ -38,7 +40,17 @@ export default function AgendaPage() {
   const shift = (n: number) => setWeekStart(new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + n));
   const todayIso = iso(new Date());
 
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  useEffect(() => { if (!form) { setErrors({}); setFormError(""); } }, [form]);
+
   async function save() {
+    const e = validate(form, {
+      title: [rules.required("Título")],
+      start: [rules.required("Data e hora")],
+      duration_min: [rules.positive("Duração")],
+    });
+    setErrors(e as Record<string, string>);
+    if (hasErrors(e)) return focusFirstInvalid();
     setFormError("");
     try {
       const { id, client, technician, ...body } = form;
@@ -46,6 +58,7 @@ export default function AgendaPage() {
         method: id ? "PUT" : "POST",
         json: { ...body, client_id: body.client_id || null, technician_id: body.technician_id || null },
       });
+      toast.success(id ? "Agendamento atualizado" : "Agendamento criado", form.title);
       setForm(null);
       reload();
     } catch (e: any) {
@@ -54,10 +67,15 @@ export default function AgendaPage() {
   }
 
   async function remove() {
-    if (!confirm("Excluir este agendamento?")) return;
-    await api(`/appointments/${form.id}`, { method: "DELETE" });
-    setForm(null);
-    reload();
+    if (!(await confirmDialog({ title: "Excluir este agendamento?", message: form.title, danger: true, confirmText: "Excluir" }))) return;
+    try {
+      await api(`/appointments/${form.id}`, { method: "DELETE" });
+      toast.success("Agendamento excluído");
+      setForm(null);
+      reload();
+    } catch (e) {
+      toast.error(e, "Não foi possível excluir");
+    }
   }
 
   const newAt = (day: Date) => setForm({
@@ -117,19 +135,19 @@ export default function AgendaPage() {
           footer={<>
             {form.id && can("excluirAgenda") && <button className="btn-danger mr-auto" onClick={remove}><Trash2 className="h-4 w-4" /></button>}
             <button className="btn-ghost" onClick={() => setForm(null)}>Cancelar</button>
-            <button className="btn-primary" disabled={!form.title || !form.start} onClick={save}>Salvar</button>
+            <button className="btn-primary" onClick={save}>Salvar</button>
           </>}>
           <ErrorBox message={formError} />
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Título" className="sm:col-span-2"><input className="input" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></Field>
+            <Field label="Título" className="sm:col-span-2" required error={errors.title}><input className="input" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></Field>
             <Field label="Tipo"><select className="input" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>{APPOINTMENT_TYPES.map((t) => <option key={t}>{t}</option>)}</select></Field>
             <Field label="Status">
               <select className="input" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
                 {["Agendado", "Concluído", "Cancelado"].map((s) => <option key={s}>{s}</option>)}
               </select>
             </Field>
-            <Field label="Data e hora"><input className="input" type="datetime-local" value={form.start} onChange={(e) => setForm({ ...form, start: e.target.value })} /></Field>
-            <Field label="Duração (min)"><input className="input" type="number" step={15} value={form.duration_min} onChange={(e) => setForm({ ...form, duration_min: Number(e.target.value) })} /></Field>
+            <Field label="Data e hora" required error={errors.start}><input className="input" type="datetime-local" value={form.start} onChange={(e) => setForm({ ...form, start: e.target.value })} /></Field>
+            <Field label="Duração (min)" error={errors.duration_min}><input className="input" type="number" min={15} step={15} value={form.duration_min} onChange={(e) => setForm({ ...form, duration_min: Number(e.target.value) })} /></Field>
             <Field label="Cliente">
               <select className="input" value={form.client_id} onChange={(e) => setForm({ ...form, client_id: e.target.value })}>
                 <option value="">—</option>{clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
