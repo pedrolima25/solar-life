@@ -157,8 +157,8 @@ export function FeedbackHost() {
 
   return (
     <>
-      {/* No topo: embaixo ficam os botões de salvar dos formulários */}
-      <div className="pointer-events-none fixed inset-x-4 top-4 z-[80] flex flex-col items-end gap-2 sm:inset-x-auto sm:right-4 sm:w-96" aria-live="polite">
+      {/* No topo e centralizado: embaixo ficam os botões de salvar e nos cantos de cima o X das janelas */}
+      <div className="pointer-events-none fixed inset-x-4 top-3 z-[80] mx-auto flex max-w-sm flex-col items-stretch gap-2" aria-live="polite">
         {toasts.map((t) => <ToastItem key={t.id} t={t} onClose={() => setToasts((l) => l.filter((x) => x.id !== t.id))} />)}
       </div>
       {confirm && <ConfirmBox c={confirm} onDone={(ok) => { confirm.resolve(ok); setConfirm(null); }} />}

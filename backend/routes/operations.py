@@ -1,6 +1,9 @@
 """Orçamentos, ordens de serviço, manutenção, agenda, financeiro, dashboard e dimensionamento."""
+import base64
+import binascii
 import calendar
 import datetime as dt
+import re
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -279,7 +282,114 @@ def order_status(oid: str, data: s.StatusIn, db: Session = Depends(get_db), user
 
 @router.delete("/orders/{oid}", dependencies=[Depends(roles(ADMIN))])
 def delete_order(oid: str, db: Session = Depends(get_db)):
-    db.delete(get_or_404(db, models.ServiceOrder, oid, "OS"))
+    o = get_or_404(db, models.ServiceOrder, oid, "OS")
+    db.query(models.ServiceOrderPhoto).filter_by(os_id=oid).delete()
+    db.delete(o)
+    db.commit()
+    return {"ok": True}
+
+
+# ── Fotos e assinatura da OS ────────────────────────────────────
+_ASSINATURAS = {b"\xff\xd8\xff": "image/jpeg", b"\x89PNG\r\n\x1a\n": "image/png"}
+MAX_FOTOS_POR_OS = 60
+
+
+def _imagem_ok(data_url: str, campo: str) -> str:
+    """Confere que é mesmo uma imagem JPEG/PNG/WebP em data URL (não só pelo texto do cabeçalho)."""
+    m = re.fullmatch(r"data:(image/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)", data_url or "")
+    if not m:
+        raise HTTPException(400, f"{campo}: formato de imagem inválido.")
+    try:
+        raw = base64.b64decode(m.group(2), validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(400, f"{campo}: imagem corrompida.")
+    webp = raw[:4] == b"RIFF" and raw[8:12] == b"WEBP"
+    if not webp and not any(raw.startswith(sig) for sig in _ASSINATURAS):
+        raise HTTPException(400, f"{campo}: o arquivo não é uma imagem válida.")
+    return data_url
+
+
+def _order_for(oid: str, db: Session, user: models.User) -> models.ServiceOrder:
+    o = get_or_404(db, models.ServiceOrder, oid, "OS")
+    _check_own_order(o, user)
+    return o
+
+
+def _photo(db: Session, oid: str, pid: str) -> models.ServiceOrderPhoto:
+    p = db.get(models.ServiceOrderPhoto, pid)
+    if not p or p.os_id != oid:
+        raise HTTPException(404, "Foto não encontrada.")
+    return p
+
+
+@router.get("/orders/{oid}/photos", response_model=List[s.PhotoOut])
+def list_photos(oid: str, db: Session = Depends(get_db), user: models.User = Depends(current_user)):
+    _order_for(oid, db, user)
+    return (db.query(models.ServiceOrderPhoto).filter_by(os_id=oid)
+            .order_by(models.ServiceOrderPhoto.created_at).all())
+
+
+@router.get("/orders/{oid}/photos/{pid}", response_model=s.PhotoFull)
+def get_photo(oid: str, pid: str, db: Session = Depends(get_db), user: models.User = Depends(current_user)):
+    _order_for(oid, db, user)
+    return _photo(db, oid, pid)
+
+
+@router.post("/orders/{oid}/photos", response_model=s.PhotoOut)
+def add_photo(oid: str, data: s.PhotoIn, db: Session = Depends(get_db), user: models.User = Depends(current_user)):
+    _order_for(oid, db, user)
+    if db.query(func.count(models.ServiceOrderPhoto.id)).filter_by(os_id=oid).scalar() >= MAX_FOTOS_POR_OS:
+        raise HTTPException(400, f"Limite de {MAX_FOTOS_POR_OS} fotos por OS.")
+    p = models.ServiceOrderPhoto(
+        os_id=oid, image=_imagem_ok(data.image, "Foto"), thumb=_imagem_ok(data.thumb, "Miniatura"),
+        legenda=(data.legenda or "").strip() or None, lat=data.lat, lng=data.lng,
+        taken_at=data.taken_at, user_id=user.id,
+    )
+    db.add(p)
+    db.commit()
+    return p
+
+
+@router.patch("/orders/{oid}/photos/{pid}", response_model=s.PhotoOut)
+def caption_photo(oid: str, pid: str, data: s.PhotoCaptionIn, db: Session = Depends(get_db),
+                  user: models.User = Depends(current_user)):
+    _order_for(oid, db, user)
+    p = _photo(db, oid, pid)
+    p.legenda = (data.legenda or "").strip() or None
+    db.commit()
+    return p
+
+
+@router.delete("/orders/{oid}/photos/{pid}")
+def delete_photo(oid: str, pid: str, db: Session = Depends(get_db), user: models.User = Depends(current_user)):
+    _order_for(oid, db, user)
+    db.delete(_photo(db, oid, pid))
+    db.commit()
+    return {"ok": True}
+
+
+@router.get("/orders/{oid}/signature", response_model=s.SignatureOut)
+def get_signature(oid: str, db: Session = Depends(get_db), user: models.User = Depends(current_user)):
+    o = _order_for(oid, db, user)
+    return {"signature": o.signature, "signed_by": o.signed_by, "signed_at": o.signed_at}
+
+
+@router.put("/orders/{oid}/signature", response_model=s.SignatureOut)
+def sign_order(oid: str, data: s.SignatureIn, db: Session = Depends(get_db), user: models.User = Depends(current_user)):
+    o = _order_for(oid, db, user)
+    if not data.signature.startswith("data:image/png;base64,"):
+        raise HTTPException(400, "Assinatura: formato inválido.")
+    o.signature = _imagem_ok(data.signature, "Assinatura")
+    o.signed_by = data.signed_by.strip()
+    o.signed_at = dt.datetime.now()
+    db.commit()
+    return {"signature": o.signature, "signed_by": o.signed_by, "signed_at": o.signed_at}
+
+
+@router.delete("/orders/{oid}/signature")
+def clear_signature(oid: str, db: Session = Depends(get_db), user: models.User = Depends(current_user)):
+    o = _order_for(oid, db, user)
+    o.signature = o.signed_by = o.signed_at = None
     db.commit()
     return {"ok": True}
 

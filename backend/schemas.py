@@ -362,6 +362,49 @@ class ServiceOrderOut(ORM):
     installation: Optional[Ref] = None
     technician: Optional[Ref] = None
     items: List[ItemOut] = []
+    # A imagem da assinatura vem em /orders/{id}/signature (fica fora da lista para não pesar)
+    has_signature: bool = False
+    signed_by: Optional[str] = None
+    signed_at: Optional[dt.datetime] = None
+
+
+class PhotoIn(BaseModel):
+    image: str = Field(max_length=4_000_000)   # ~3 MB de JPEG em base64
+    thumb: str = Field(max_length=300_000)
+    legenda: Optional[str] = Field(None, max_length=200)
+    lat: Optional[float] = Field(None, ge=-90, le=90)
+    lng: Optional[float] = Field(None, ge=-180, le=180)
+    taken_at: Optional[dt.datetime] = None
+
+
+class PhotoCaptionIn(BaseModel):
+    legenda: Optional[str] = Field(None, max_length=200)
+
+
+class PhotoOut(ORM):
+    id: str
+    legenda: Optional[str] = None
+    thumb: str
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    taken_at: Optional[dt.datetime] = None
+    created_at: Optional[dt.datetime] = None
+    user: Optional[Ref] = None
+
+
+class PhotoFull(PhotoOut):
+    image: str
+
+
+class SignatureIn(BaseModel):
+    signature: str = Field(max_length=600_000)
+    signed_by: str = Field(min_length=2, max_length=120)
+
+
+class SignatureOut(BaseModel):
+    signature: Optional[str] = None
+    signed_by: Optional[str] = None
+    signed_at: Optional[dt.datetime] = None
 
 
 class StatusIn(BaseModel):

@@ -215,10 +215,20 @@ class ServiceOrder(Base):
     created_at = Column(DateTime, default=now)
     finished_at = Column(DateTime)
 
+    # Assinatura do cliente na conclusão (imagem PNG em data URL)
+    signature = Column(Text)
+    signed_by = Column(String)
+    signed_at = Column(DateTime)
+
     client = relationship("Client")
     installation = relationship("Installation")
     technician = relationship("User")
     items = relationship("ServiceOrderItem", cascade="all, delete-orphan", order_by="ServiceOrderItem.position")
+    # Fotos ficam em ServiceOrderPhoto (os_fotos) e são apagadas junto com a OS em delete_order
+
+    @property
+    def has_signature(self) -> bool:
+        return bool(self.signature)
 
 
 class ServiceOrderItem(Base):
@@ -232,6 +242,23 @@ class ServiceOrderItem(Base):
     component = Column(String)   # rótulo na proposta (ex.: "Módulos fotovoltaicos")
     qty_label = Column(String)   # quantidade exibida (ex.: "30 + 30", "2 pares")
     position = Column(Integer, default=0)
+
+
+class ServiceOrderPhoto(Base):
+    """Foto da obra/serviço tirada pelo técnico (JPEG comprimido no celular, guardado no banco)."""
+    __tablename__ = "os_fotos"
+    id = Column(String, primary_key=True, default=gen_id)
+    os_id = Column(String, ForeignKey("service_orders.id"), nullable=False, index=True)
+    legenda = Column(String(200))
+    image = Column(Text, nullable=False)   # data URL, lado maior ~1600 px
+    thumb = Column(Text, nullable=False)   # data URL, ~320 px (lista)
+    lat = Column(Float)                    # onde a foto foi enviada (se o celular permitir)
+    lng = Column(Float)
+    taken_at = Column(DateTime)
+    user_id = Column(String, ForeignKey("users.id"))
+    created_at = Column(DateTime, default=now)
+
+    user = relationship("User")
 
 
 class MaintenancePlan(Base):

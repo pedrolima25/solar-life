@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import clsx from "clsx";
 import { ItemsEditor, itemsTotal, type Item, type Product } from "@/components/ItemsEditor";
+import { OSPhotosAndSignature } from "@/components/OSPhotos";
 import { confirmDialog, focusFirstInvalid, toast } from "@/components/feedback";
 import { Badge, Empty, ErrorBox, Field, Loading, Modal, PageHeader, StatusBadge } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -201,7 +202,7 @@ function OSContent() {
       )}
 
       {form && <OSModal form={form} setForm={setForm} clients={clients} users={technicians} products={products}
-        onSaved={() => { setForm(null); reload(); }} />}
+        onSaved={(keepOpen) => { if (!keepOpen) setForm(null); reload(); }} />}
 
       {notify && (() => {
         const link = whatsappLink(notify.os.client.phone,
@@ -224,9 +225,10 @@ function OSModal({ form, setForm, clients, users, products, onSaved }: {
   clients: any[];
   users: any[];
   products: Product[];
-  onSaved: () => void;
+  /** keepOpen: OS recém-criada pela aba de fotos continua aberta para tirar as fotos. */
+  onSaved: (keepOpen?: boolean) => void;
 }) {
-  const [tab, setTab] = useState<"dados" | "tecnico" | "itens">("dados");
+  const [tab, setTab] = useState<"dados" | "tecnico" | "itens" | "fotos">("dados");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const { data: installations = [] } = useApi<any[]>(form.client_id ? `/installations?client_id=${form.client_id}` : null, []);
@@ -266,12 +268,15 @@ function OSModal({ form, setForm, clients, users, products, onSaved }: {
     setError("");
     try {
       const { id, number, ...body } = form;
-      await api(id ? `/orders/${id}` : "/orders", {
+      const saved = await api(id ? `/orders/${id}` : "/orders", {
         method: id ? "PUT" : "POST",
         json: { ...body, scheduled_date: form.scheduled_date || null, installation_id: form.installation_id || null, technician_id: form.technician_id || null },
       });
-      toast.success(id ? `OS #${number} atualizada` : "Ordem de serviço criada");
-      onSaved();
+      toast.success(id ? `OS #${number} atualizada` : `OS #${saved.number} criada`);
+      if (!id && tab === "fotos") {
+        set({ id: saved.id, number: saved.number });
+        onSaved(true);
+      } else onSaved();
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -291,7 +296,10 @@ function OSModal({ form, setForm, clients, users, products, onSaved }: {
     }
   }
 
-  const tabs = [{ id: "dados", label: "Dados" }, { id: "tecnico", label: "Técnico / Checklist" }, { id: "itens", label: `Itens (${form.items.length})` }] as const;
+  const tabs = [
+    { id: "dados", label: "Dados" }, { id: "tecnico", label: "Técnico / Checklist" },
+    { id: "itens", label: `Itens (${form.items.length})` }, { id: "fotos", label: "Fotos e assinatura" },
+  ] as const;
 
   return (
     <Modal title={form.id ? `OS #${form.number}` : "Nova ordem de serviço"} onClose={() => setForm(null)} size="xl"
@@ -302,10 +310,10 @@ function OSModal({ form, setForm, clients, users, products, onSaved }: {
         <button className="btn-primary" disabled={saving} onClick={save}>{saving ? "Salvando…" : "Salvar"}</button>
       </>}>
       <ErrorBox message={error} />
-      <div className="mb-5 flex gap-1 rounded-xl bg-muted p-1">
+      <div className="mb-5 flex gap-1 overflow-x-auto rounded-xl bg-muted p-1">
         {tabs.map((t) => (
           <button key={t.id} onClick={() => setTab(t.id)}
-            className={clsx("flex-1 rounded-lg px-3 py-2 text-sm font-semibold", tab === t.id ? "bg-card shadow" : "text-muted-foreground")}>
+            className={clsx("flex-1 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-semibold", tab === t.id ? "bg-card shadow" : "text-muted-foreground")}>
             {t.label}
           </button>
         ))}
@@ -397,6 +405,16 @@ function OSModal({ form, setForm, clients, users, products, onSaved }: {
           <ItemsEditor items={form.items} onChange={(items) => set({ items })} products={products} />
         </div>
       )}
+
+      {tab === "fotos" && (form.id
+        ? <OSPhotosAndSignature osId={form.id} clientName={clients.find((c) => c.id === form.client_id)?.name} />
+        : (
+          <div className="rounded-2xl border border-dashed border-border px-6 py-10 text-center text-sm text-muted-foreground">
+            <p className="font-semibold text-foreground">Salve a OS primeiro</p>
+            <p className="mt-1">Depois de salvar, as fotos e a assinatura do cliente podem ser adicionadas aqui.</p>
+            <button className="btn-primary mt-4" disabled={saving} onClick={save}>Salvar OS</button>
+          </div>
+        ))}
     </Modal>
   );
 }

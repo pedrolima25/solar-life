@@ -40,6 +40,7 @@ ROTULOS = {
     "tarifa_kwh": "Tarifa", "hsp_padrao": "HSP", "custo_kwp": "Preço por kWp", "potencia_modulo_w": "Potência do módulo",
     "consumo_kwh": "Consumo", "valor_investimento": "Valor do investimento", "qtd_paineis": "Quantidade de painéis",
     "qtd_baterias": "Quantidade de baterias", "potencia_inversor_kw": "Potência do inversor",
+    "signed_by": "Nome de quem assina", "legenda": "Legenda",
 }
 
 _MSG = {
