@@ -43,7 +43,7 @@ ROTULOS = {
 }
 
 _MSG = {
-    "missing": "é obrigatório", "string_too_short": "é obrigatório", "greater_than": "deve ser maior que {gt}",
+    "missing": ": campo obrigatório", "string_too_short": ": campo obrigatório", "greater_than": "deve ser maior que {gt}",
     "greater_than_equal": "deve ser no mínimo {ge}", "less_than_equal": "deve ser no máximo {le}",
     "less_than": "deve ser menor que {lt}", "string_pattern_mismatch": "tem um valor inválido",
     "float_parsing": "deve ser um número", "int_parsing": "deve ser um número inteiro",
@@ -69,7 +69,8 @@ async def validation_error(request: Request, exc: RequestValidationError):
             modelo = _MSG.get(e.get("type", ""))
             # 0.0 → "0", 1.5 → "1,5"
             ctx = {k: (f"{x:g}".replace(".", ",") if isinstance(x, (int, float)) else x) for k, x in (e.get("ctx") or {}).items()}
-            frase = f"{campo} {modelo.format(**ctx)}." if modelo and campo else f"{campo}: {msg}".strip(": ")
+            texto = modelo.format(**ctx) if modelo else ""
+            frase = (f"{campo}{texto}." if texto.startswith(":") else f"{campo} {texto}.") if modelo and campo else f"{campo}: {msg}".strip(": ")
         if frase not in frases:
             frases.append(frase)
     return JSONResponse(status_code=422, content={"detail": " ".join(frases) or "Dados inválidos."})

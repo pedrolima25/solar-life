@@ -51,7 +51,7 @@ type Rule = (v: any) => string | null;
 
 export const rules = {
   required: (label = "Campo"): Rule => (v) =>
-    v === null || v === undefined || (typeof v === "string" && !v.trim()) ? `${label} é obrigatório.` : null,
+    v === null || v === undefined || (typeof v === "string" && !v.trim()) ? `${label}: campo obrigatório.` : null,
   email: (): Rule => (v) => (v && !isEmail(v) ? "E-mail inválido." : null),
   phone: (): Rule => (v) => (v && !isPhone(v) ? "Telefone deve ter DDD + número (10 ou 11 dígitos)." : null),
   cep: (): Rule => (v) => (v && !isCEP(v) ? "CEP deve ter 8 dígitos." : null),
