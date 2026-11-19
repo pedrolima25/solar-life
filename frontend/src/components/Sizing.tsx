@@ -22,12 +22,73 @@ export type SizingInput = {
   horas_backup: number | null;
   qtd_paineis: number | null;   // vazio = calculado pelo consumo
   qtd_baterias: number | null;  // vazio = calculado pela autonomia/reserva
+  marca_painel_id: string | null;
+  marca_inversor_id: string | null;
+  potencia_inversor_kw: number | null; // vazio = sugerido pelo cálculo
 };
+
+export type Brand = { id: string; nome: string; tipo: "inversor" | "painel"; ativo: boolean };
+
+const OUTRA = "__outra__";
+
+/** Dropdown de marcas ativas + “Outra…”, que cadastra a marca digitada. */
+function BrandSelect({ tipo, value, brands, onChange, onCreated }: {
+  tipo: Brand["tipo"];
+  value: string | null;
+  brands: Brand[];
+  onChange: (id: string | null) => void;
+  onCreated: (b: Brand) => void;
+}) {
+  const [outra, setOutra] = useState(false);
+  const [nome, setNome] = useState("");
+  const [erro, setErro] = useState("");
+  // Ativas do tipo + a já escolhida (mesmo que tenha sido desativada depois)
+  const opcoes = brands.filter((b) => b.tipo === tipo && (b.ativo || b.id === value));
+
+  async function criar() {
+    const n = nome.trim();
+    if (!n) { setOutra(false); return; }
+    try {
+      const b: Brand = await api("/marcas", { method: "POST", json: { nome: n, tipo } });
+      onCreated(b);
+      onChange(b.id);
+      setOutra(false);
+      setNome("");
+      setErro("");
+    } catch (e: any) {
+      setErro(e.message);
+    }
+  }
+
+  if (outra) {
+    return (
+      <div>
+        <div className="flex gap-1.5">
+          <input className="input" autoFocus placeholder="Nome da marca" maxLength={60} value={nome}
+            onChange={(e) => setNome(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); criar(); } if (e.key === "Escape") setOutra(false); }} />
+          <button type="button" className="btn-primary px-3" onClick={criar}>OK</button>
+        </div>
+        {erro && <p className="mt-1 text-xs text-red-500">{erro}</p>}
+      </div>
+    );
+  }
+  return (
+    <select className="input" value={value ?? ""} onChange={(e) => {
+      if (e.target.value === OUTRA) setOutra(true);
+      else onChange(e.target.value || null);
+    }}>
+      <option value="">Selecione...</option>
+      {opcoes.map((b) => <option key={b.id} value={b.id}>{b.nome}</option>)}
+      <option value={OUTRA}>Outra…</option>
+    </select>
+  );
+}
 
 export const EMPTY_SIZING: SizingInput = {
   consumo_kwh: null, tipo_ligacao: "Bifásico", hsp: null, potencia_modulo_w: null, tarifa_kwh: null, custo_kwp: null,
   tipo_sistema: "On-Grid", tipo_bateria: "Lítio", autonomia_dias: 1, carga_essencial_kw: 1.5, horas_backup: 4,
-  qtd_paineis: null, qtd_baterias: null,
+  qtd_paineis: null, qtd_baterias: null, marca_painel_id: null, marca_inversor_id: null, potencia_inversor_kw: null,
 };
 
 /** Potência pico do gerador (kWp) = quantidade de painéis × potência do painel (W) / 1000. */
@@ -52,9 +113,18 @@ export function SizingForm({ input, onInput, onResult, narrow }: {
   const [error, setError] = useState("");
   const [last, setLast] = useState<any>(null); // último resultado, para mostrar as quantidades sugeridas
 
+  const [brands, setBrands] = useState<Brand[]>([]);
+
   useEffect(() => {
     api("/company").then(setCompany).catch(() => null);
+    api("/marcas").then(setBrands).catch(() => null);
   }, []);
+
+  const brandSelect = (campo: "marca_painel_id" | "marca_inversor_id", tipo: Brand["tipo"]) => (
+    <BrandSelect tipo={tipo} value={input[campo]} brands={brands}
+      onChange={(id) => onInput({ ...input, [campo]: id })}
+      onCreated={(b) => setBrands((l) => [...l.filter((x) => x.id !== b.id), b])} />
+  );
 
   useEffect(() => {
     if (!input.consumo_kwh || input.consumo_kwh <= 0) {
@@ -118,6 +188,7 @@ export function SizingForm({ input, onInput, onResult, narrow }: {
         </Field>
       )}
       <Field label="Irradiação — HSP (h/dia)"><input className="input" type="number" step="0.1" placeholder={company ? String(company.hsp_padrao) : ""} {...set("hsp")} /></Field>
+      <Field label="Marca do painel">{brandSelect("marca_painel_id", "painel")}</Field>
       <Field label="Potência do painel (W)"><input className="input" type="number" min={0} placeholder={company ? String(company.potencia_modulo_w) : ""} {...set("potencia_modulo_w")} /></Field>
       <Field label="Quantidade de painéis">
         <input className="input" type="number" min={1} step={1} placeholder={last?.num_modulos_sugerido ? `Automático: ${last.num_modulos_sugerido}` : "Automático"} {...set("qtd_paineis")} />
@@ -125,6 +196,11 @@ export function SizingForm({ input, onInput, onResult, narrow }: {
       <Field label="Potência pico (kWp)">
         <input className="input cursor-not-allowed bg-muted font-semibold" readOnly tabIndex={-1} value={kwpGerador ? num(kwpGerador, 2) : "—"}
           title="Quantidade de painéis × potência do painel ÷ 1000" />
+      </Field>
+      <Field label="Marca do inversor">{brandSelect("marca_inversor_id", "inversor")}</Field>
+      <Field label="Potência do inversor (kW)">
+        <input className="input" type="number" min={0} step="0.1"
+          placeholder={last?.inversor_kw_sugerido ? `Sugerido: ${num(last.inversor_kw_sugerido, 1)}` : "Automático"} {...set("potencia_inversor_kw")} />
       </Field>
       <Field label="Tarifa (R$/kWh)"><input className="input" type="number" step="0.01" placeholder={company ? String(company.tarifa_kwh) : ""} {...set("tarifa_kwh")} /></Field>
       <Field label="Preço por kWp (R$)"><input className="input" type="number" placeholder={company ? String(company.custo_kwp) : ""} {...set("custo_kwp")} /></Field>
@@ -168,9 +244,10 @@ export function SizingForm({ input, onInput, onResult, narrow }: {
 
 export function SizingResult({ r, compact }: { r: any; compact?: boolean }) {
   const cards = [
-    { icon: SolarPanel, label: "Potência do sistema", value: `${num(r.kwp_real, 2)} kWp`, hint: `${r.num_modulos} módulos de ${r.potencia_modulo_w} W` },
+    { icon: SolarPanel, label: "Potência do sistema", value: `${num(r.kwp_real, 2)} kWp`, hint: `${r.num_modulos} módulos ${r.marca_painel ? r.marca_painel + " " : ""}de ${r.potencia_modulo_w} W` },
     { icon: Zap, label: "Geração estimada", value: `${num(r.geracao_mensal_kwh)} kWh/mês`, hint: `${num(r.geracao_anual_kwh)} kWh/ano` },
-    { icon: Gauge, label: "Inversor sugerido", value: `${num(r.inversor_kw, 1)} kW`, hint: `Área aprox.: ${num(r.area_m2, 1)} m²` },
+    { icon: Gauge, label: r.potencia_inversor_kw ? "Inversor" : "Inversor sugerido", value: `${num(r.inversor_kw, 1)} kW`,
+      hint: `${r.marca_inversor ? r.marca_inversor + " · " : ""}Área aprox.: ${num(r.area_m2, 1)} m²` },
     { icon: PiggyBank, label: "Economia mensal", value: brl(r.economia_mensal), hint: `Conta: ${brl(r.conta_atual)} → ${brl(r.conta_nova)}` },
     { icon: TrendingUp, label: "Retorno (payback)", value: r.payback_anos ? `${num(r.payback_anos, 1)} anos` : "—", hint: `Investimento: ${brl(r.investimento)}` },
     { icon: Leaf, label: "Economia em 25 anos", value: brl(r.economia_25_anos), hint: `${num(r.co2_evitado_ton_ano, 2)} t de CO₂ evitadas/ano` },
@@ -292,21 +369,27 @@ export function suggestItems(r: any, products: Product[]): Item[] {
   // Prefere o módulo do catálogo com a mesma potência do dimensionamento; se for outro,
   // recalcula a quantidade pela potência dele para não ficar abaixo do necessário.
   const watts = (p: Product) => Number(p.name.match(/(\d+(?:[.,]\d+)?)\s*W\b/i)?.[1].replace(",", ".") || 0);
-  const modulos = products.filter((p) => p.category === "Módulo Solar");
-  const modulo = modulos.find((p) => watts(p) === r.potencia_modulo_w) ?? modulos[0];
+  // Com marca escolhida, só serve produto do catálogo dessa marca (pelo campo marca ou pelo nome);
+  // se não houver, o item sai com a descrição da marca e preço a preencher.
+  const daMarca = (p: Product, marca: string) => `${p.brand ?? ""} ${p.name}`.toLowerCase().includes(marca.toLowerCase());
+  const daMarcaEscolhida = (lista: Product[], marca?: string | null) => (marca ? lista.filter((p) => daMarca(p, marca)) : lista);
+  const marcaPainel = r.marca_painel ? `${r.marca_painel} ` : "";
+  const modulos = daMarcaEscolhida(products.filter((p) => p.category === "Módulo Solar"), r.marca_painel);
+  // Com quantidade digitada, só aceita módulo do catálogo com a mesma potência (a quantidade é do vendedor)
+  const modulo = modulos.find((p) => watts(p) === r.potencia_modulo_w) ?? (r.qtd_paineis ? undefined : modulos[0]);
   const wMod = (modulo && watts(modulo)) || r.potencia_modulo_w;
   const qtdModulos = wMod === r.potencia_modulo_w ? r.num_modulos : Math.max(Math.ceil((r.kwp_necessario * 1000) / wMod), 1);
   const kwpItens = Math.round(qtdModulos * wMod) / 1000;
-  items.push({ product_id: modulo?.id ?? null, description: modulo?.name ?? `Módulo fotovoltaico ${r.potencia_modulo_w} W`, quantity: qtdModulos, unit_price: modulo?.sale_price ?? 0 });
+  items.push({ product_id: modulo?.id ?? null, description: modulo?.name ?? `Módulo fotovoltaico ${marcaPainel}${r.potencia_modulo_w} W`, quantity: qtdModulos, unit_price: modulo?.sale_price ?? 0 });
 
   const sistema = r.tipo_sistema || "On-Grid";
   const ehDoTipo = (p: Product) =>
     sistema === "Off-Grid" ? /off.?grid/i.test(p.name) : sistema === "Híbrido" ? /h[íi]brido/i.test(p.name) : !/off.?grid|h[íi]brido/i.test(p.name);
   const todosInv = products.filter((p) => p.category === "Inversor");
-  const inversores = todosInv.some(ehDoTipo) ? todosInv.filter(ehDoTipo) : todosInv;
+  const inversores = daMarcaEscolhida(todosInv.some(ehDoTipo) ? todosInv.filter(ehDoTipo) : todosInv, r.marca_inversor);
   const kw = (p: Product) => Number((p.name.match(/(\d+[.,]?\d*)\s*kW/i)?.[1] || "0").replace(",", "."));
   const inversor = inversores.filter((p) => kw(p) >= r.inversor_kw).sort((a, b) => kw(a) - kw(b))[0] ?? inversores.sort((a, b) => kw(b) - kw(a))[0];
-  items.push({ product_id: inversor?.id ?? null, description: inversor?.name ?? `Inversor ${sistema.toLowerCase()} ${r.inversor_kw} kW`, quantity: 1, unit_price: inversor?.sale_price ?? 0 });
+  items.push({ product_id: inversor?.id ?? null, description: inversor?.name ?? `Inversor ${r.marca_inversor ? r.marca_inversor + " " : ""}${sistema.toLowerCase()} ${num(r.inversor_kw, 1).replace(/,0$/, "")} kW`, quantity: 1, unit_price: inversor?.sale_price ?? 0 });
 
   const estrutura = find("Estrutura", (p) => !/bateria/i.test(p.name));
   if (estrutura) items.push({ product_id: estrutura.id, description: estrutura.name, quantity: Math.ceil(qtdModulos / 4), unit_price: estrutura.sale_price });

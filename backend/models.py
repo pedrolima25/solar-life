@@ -1,7 +1,7 @@
 import datetime
 import uuid
 
-from sqlalchemy import JSON, Boolean, Column, Date, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Column, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from database import Base
@@ -122,6 +122,16 @@ class Product(Base):
     created_at = Column(DateTime, default=now)
 
 
+class Brand(Base):
+    """Marcas de inversor e de painel usadas nos orçamentos (cadastráveis em Configurações)."""
+    __tablename__ = "marcas"
+    __table_args__ = (UniqueConstraint("nome", "tipo", name="uq_marca_nome_tipo"),)
+    id = Column(String, primary_key=True, default=gen_id)
+    nome = Column(String(60), nullable=False)
+    tipo = Column(String(10), nullable=False)   # inversor | painel
+    ativo = Column(Boolean, default=True, nullable=False)
+
+
 class Quote(Base):
     """Orçamento / proposta comercial."""
     __tablename__ = "quotes"
@@ -141,7 +151,10 @@ class Quote(Base):
     notes = Column(Text)
     local_instalacao = Column(String)
     potencia_kwp = Column(Float)        # opcional: sobrescreve a potência calculada pelos itens
-    # Gerador e baterias (preenchidos a partir do dimensionamento ao salvar)
+    # Equipamentos, gerador e baterias (preenchidos a partir do dimensionamento ao salvar)
+    marca_inversor_id = Column(String, ForeignKey("marcas.id"))
+    potencia_inversor_kw = Column(Float)
+    marca_painel_id = Column(String, ForeignKey("marcas.id"))
     qtd_paineis = Column(Integer)
     potencia_painel_w = Column(Integer)
     kwp = Column(Float)                 # qtd_paineis x potencia_painel_w / 1000
@@ -156,6 +169,8 @@ class Quote(Base):
     approved_at = Column(DateTime)
 
     client = relationship("Client")
+    marca_inversor = relationship("Brand", foreign_keys=[marca_inversor_id])
+    marca_painel = relationship("Brand", foreign_keys=[marca_painel_id])
     items = relationship("QuoteItem", cascade="all, delete-orphan", order_by="QuoteItem.position")
 
 

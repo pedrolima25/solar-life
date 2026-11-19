@@ -5,7 +5,7 @@ import time
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 import models
@@ -233,6 +233,43 @@ def delete_product(pid: str, db: Session = Depends(get_db)):
     db.delete(get_or_404(db, models.Product, pid, "Produto"))
     db.commit()
     return {"ok": True}
+
+
+# ── Marcas de inversor e painel ─────────────────────────────────
+@protected.get("/marcas", response_model=List[s.BrandOut])
+def list_brands(tipo: Optional[str] = None, db: Session = Depends(get_db)):
+    query = db.query(models.Brand)
+    if tipo:
+        query = query.filter_by(tipo=tipo)
+    return query.order_by(models.Brand.tipo, models.Brand.nome).all()
+
+
+@protected.post("/marcas", response_model=s.BrandOut, dependencies=[Depends(roles(*GESTAO))])
+def create_brand(data: s.BrandIn, db: Session = Depends(get_db)):
+    """Cria a marca ou devolve a existente com o mesmo nome (reativando-a), para a opção “Outra”."""
+    nome = " ".join(data.nome.split())
+    m = db.query(models.Brand).filter(models.Brand.tipo == data.tipo,
+                                      func.lower(models.Brand.nome) == nome.lower()).first()
+    if m:
+        m.ativo = True
+    else:
+        m = models.Brand(nome=nome, tipo=data.tipo, ativo=True)
+        db.add(m)
+    db.commit()
+    return m
+
+
+@protected.put("/marcas/{mid}", response_model=s.BrandOut, dependencies=[Depends(roles(ADMIN))])
+def update_brand(mid: str, data: s.BrandIn, db: Session = Depends(get_db)):
+    m = get_or_404(db, models.Brand, mid, "Marca")
+    nome = " ".join(data.nome.split())
+    dup = db.query(models.Brand).filter(models.Brand.id != mid, models.Brand.tipo == data.tipo,
+                                        func.lower(models.Brand.nome) == nome.lower()).first()
+    if dup:
+        raise HTTPException(400, "Já existe uma marca com esse nome.")
+    m.nome, m.tipo, m.ativo = nome, data.tipo, data.ativo
+    db.commit()
+    return m
 
 
 router.include_router(protected)

@@ -2,6 +2,7 @@
 
 import { Check } from "lucide-react";
 import { useEffect, useState } from "react";
+import type { Brand } from "@/components/Sizing";
 import { ErrorBox, Field, Loading, PageHeader, useFormBinder } from "@/components/ui";
 import { api } from "@/lib/api";
 import { useApi } from "@/lib/hooks";
@@ -103,7 +104,59 @@ export default function ConfiguracoesPage() {
           </div>
           <p className="mt-2 text-xs text-muted-foreground">A observação da relação CC/CA do inversor e a validade da proposta são geradas automaticamente.</p>
         </section>
+
+        <MarcasSection />
       </div>
     </>
+  );
+}
+
+/** Marcas de inversor e painel que aparecem nos dropdowns do orçamento. Salva na hora. */
+function MarcasSection() {
+  const [marcas, setMarcas] = useState<Brand[]>([]);
+  const [novo, setNovo] = useState<Record<Brand["tipo"], string>>({ inversor: "", painel: "" });
+  const [erro, setErro] = useState("");
+
+  const carregar = () => api("/marcas").then(setMarcas).catch((e) => setErro(e.message));
+  useEffect(() => { carregar(); }, []);
+
+  async function salvar(req: Promise<unknown>) {
+    setErro("");
+    try { await req; await carregar(); } catch (e: any) { setErro(e.message); }
+  }
+
+  const adicionar = (tipo: Brand["tipo"]) => {
+    if (!novo[tipo].trim()) return;
+    salvar(api("/marcas", { method: "POST", json: { nome: novo[tipo], tipo } }).then(() => setNovo((n) => ({ ...n, [tipo]: "" }))));
+  };
+  const alternar = (m: Brand) => salvar(api(`/marcas/${m.id}`, { method: "PUT", json: { nome: m.nome, tipo: m.tipo, ativo: !m.ativo } }));
+
+  return (
+    <section className="card p-5 xl:col-span-2">
+      <h2 className="mb-1 font-semibold">Marcas de inversor e painel</h2>
+      <p className="mb-4 text-xs text-muted-foreground">Aparecem nos dropdowns do orçamento. Clique numa marca para ativar ou desativar; as desativadas somem da lista, mas os orçamentos antigos continuam com elas.</p>
+      <ErrorBox message={erro} />
+      <div className="grid gap-6 lg:grid-cols-2">
+        {(["inversor", "painel"] as const).map((tipo) => (
+          <div key={tipo}>
+            <p className="label">{tipo === "inversor" ? "Inversores" : "Painéis"}</p>
+            <div className="mb-3 flex flex-wrap gap-1.5">
+              {marcas.filter((m) => m.tipo === tipo).map((m) => (
+                <button key={m.id} type="button" onClick={() => alternar(m)} title={m.ativo ? "Clique para desativar" : "Clique para ativar"}
+                  className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition ${m.ativo ? "border-primary/40 bg-primary/10 text-primary" : "border-border text-muted-foreground line-through opacity-60"}`}>
+                  {m.ativo && <Check className="h-3 w-3" />} {m.nome}
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-1.5">
+              <input className="input" placeholder={`Nova marca de ${tipo}`} maxLength={60} value={novo[tipo]}
+                onChange={(e) => setNovo((n) => ({ ...n, [tipo]: e.target.value }))}
+                onKeyDown={(e) => { if (e.key === "Enter") adicionar(tipo); }} />
+              <button type="button" className="btn-primary px-3" onClick={() => adicionar(tipo)}>Adicionar</button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }

@@ -31,6 +31,12 @@ PRODUTOS = [
 ]
 
 # Off-Grid / Híbrido — adicionados também em bancos que já existiam
+# Marcas mais usadas no Brasil (o administrador inclui/desativa outras em Configurações)
+MARCAS = {
+    "inversor": ["Growatt", "Deye", "Sofar", "Solplanet", "Solis", "GoodWe", "Huawei", "SAJ", "Sungrow", "Fronius"],
+    "painel": ["Jinko", "Canadian Solar", "Trina", "Longi", "JA Solar", "Risen", "BYD", "Astronergy", "DAH Solar", "Osda"],
+}
+
 PRODUTOS_BATERIA = [
     ("Bateria Lítio LiFePO4 48 V 100 Ah (5,12 kWh)", "Bateria", "un", 9800, 14500, False),
     ("Bateria Estacionária 12 V 220 Ah (2,64 kWh)", "Bateria", "un", 1150, 1650, False),
@@ -126,4 +132,8 @@ def seed(db: Session):
         for name, cat, unit, cost, price, service in novos:
             db.add(models.Product(name=name, category=cat, unit=unit, cost_price=cost, sale_price=price,
                                   is_service=service, stock=0 if service else 10, min_stock=0 if service else 2))
+    if not db.query(models.Brand).first():
+        for tipo, nomes in MARCAS.items():
+            for nome in nomes:
+                db.add(models.Brand(nome=nome, tipo=tipo))
     db.commit()

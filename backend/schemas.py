@@ -135,6 +135,17 @@ class StockMove(BaseModel):
     quantity: float  # positivo = entrada, negativo = saída
 
 
+# ── Marcas (inversor / painel) ──────────────────────────────────
+class BrandIn(BaseModel):
+    nome: str = Field(min_length=1, max_length=60)
+    tipo: str = Field(pattern="^(inversor|painel)$")
+    ativo: bool = True
+
+
+class BrandOut(BrandIn, ORM):
+    id: str
+
+
 # ── Itens (orçamento / OS) ──────────────────────────────────────
 class ItemIn(BaseModel):
     product_id: Optional[str] = None
@@ -183,6 +194,11 @@ class QuoteOut(ORM):
     notes: Optional[str] = None
     local_instalacao: Optional[str] = None
     potencia_kwp: Optional[float] = None
+    marca_inversor_id: Optional[str] = None
+    potencia_inversor_kw: Optional[float] = None
+    marca_painel_id: Optional[str] = None
+    marca_inversor: Optional[BrandOut] = None
+    marca_painel: Optional[BrandOut] = None
     qtd_paineis: Optional[int] = None
     potencia_painel_w: Optional[int] = None
     kwp: Optional[float] = None
@@ -336,6 +352,9 @@ class SizingIn(BaseModel):
     tensao_banco: int = 48
     qtd_paineis: Optional[int] = Field(None, ge=0)    # vazio = calculado pelo consumo
     qtd_baterias: Optional[int] = Field(None, ge=0)   # vazio = calculado pela autonomia/reserva
+    potencia_inversor_kw: Optional[float] = Field(None, gt=0)  # vazio = sugerido pelo cálculo
+    marca_inversor_id: Optional[str] = None
+    marca_painel_id: Optional[str] = None
 
 
 AnyDict = dict[str, Any]

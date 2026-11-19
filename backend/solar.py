@@ -83,7 +83,8 @@ def dimensionar(consumo_kwh: float, tipo_ligacao: str, hsp: float, potencia_modu
                 tipo_bateria: str = "Lítio", autonomia_dias: float = 1.0,
                 carga_essencial_kw: float = 1.5, horas_backup: float = 4.0,
                 tensao_banco: int = 48, custo_bateria_kwh: float = 2800.0,
-                qtd_paineis: int | None = None, qtd_baterias: int | None = None) -> dict:
+                qtd_paineis: int | None = None, qtd_baterias: int | None = None,
+                potencia_inversor_kw: float | None = None) -> dict:
     if tipo_sistema not in TIPOS_SISTEMA:
         tipo_sistema = "On-Grid"
     off_grid = tipo_sistema == "Off-Grid"
@@ -127,6 +128,10 @@ def dimensionar(consumo_kwh: float, tipo_ligacao: str, hsp: float, potencia_modu
         # Inversor híbrido sem banco: nenhuma bateria no orçamento, pronto para receber depois
         banco = {"tipo_bateria": SEM_BATERIA, "num_baterias": 0, "banco_kwh": 0, "banco_util_kwh": 0,
                  "custo_baterias": 0.0, "preparado_expansao": True}
+
+    inversor_kw_sugerido = inversor_kw
+    if potencia_inversor_kw:
+        inversor_kw = round(potencia_inversor_kw, 2)   # informada pelo vendedor
 
     if off_grid:
         # Sem conta de luz: a economia é o custo da energia que seria comprada
@@ -188,6 +193,8 @@ def dimensionar(consumo_kwh: float, tipo_ligacao: str, hsp: float, potencia_modu
         "qtd_baterias": (qtd_baterias or None) if com_bateria else None,
         "kwp_real": round(kwp_real, 2),
         "inversor_kw": inversor_kw,
+        "inversor_kw_sugerido": inversor_kw_sugerido,
+        "potencia_inversor_kw": potencia_inversor_kw or None,
         "geracao_mensal_kwh": round(geracao_mensal, 1),
         "geracao_anual_kwh": round(geracao_mensal * 12, 0),
         "area_m2": round(num_modulos * AREA_POR_MODULO_M2, 1),

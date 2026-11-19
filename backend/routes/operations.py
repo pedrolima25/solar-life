@@ -35,11 +35,19 @@ def solar_sizing(data: s.SizingIn, db: Session = Depends(get_db)):
     if not hsp:
         # Off-Grid é dimensionado pelo pior mês (sem rede para complementar)
         hsp = min(c.hsp_mensal) if data.tipo_sistema == "Off-Grid" and c.hsp_mensal else c.hsp_padrao
+    marcas = {}
+    for campo, tipo in (("marca_inversor", "inversor"), ("marca_painel", "painel")):
+        mid = getattr(data, f"{campo}_id")
+        m = db.get(models.Brand, mid) if mid else None
+        if mid and (not m or m.tipo != tipo):
+            raise HTTPException(400, f"Marca de {tipo} inválida.")
+        marcas[f"{campo}_id"], marcas[campo] = (m.id, m.nome) if m else (None, None)
     try:
-        return dimensionar(
+        return marcas | dimensionar(
             consumo_kwh=data.consumo_kwh,
             qtd_paineis=data.qtd_paineis,
             qtd_baterias=data.qtd_baterias,
+            potencia_inversor_kw=data.potencia_inversor_kw,
             tipo_ligacao=data.tipo_ligacao,
             hsp=hsp,
             potencia_modulo_w=data.potencia_modulo_w or c.potencia_modulo_w,
@@ -79,6 +87,9 @@ _TIPO_BATERIA = {"Lítio": "litio", "Chumbo-ácido": "chumbo", SEM_BATERIA: "sem
 def _gerador_e_baterias(q: models.Quote, sz: Optional[dict]):
     """Grava painéis, kWp e baterias do dimensionamento nas colunas do orçamento e valida as baterias."""
     sz = sz or {}
+    q.marca_inversor_id = sz.get("marca_inversor_id") or None
+    q.potencia_inversor_kw = sz.get("inversor_kw") or None
+    q.marca_painel_id = sz.get("marca_painel_id") or None
     q.qtd_paineis = sz.get("num_modulos") or None
     q.potencia_painel_w = sz.get("potencia_modulo_w") or None
     q.kwp = kwp(q.qtd_paineis, q.potencia_painel_w) if q.qtd_paineis and q.potencia_painel_w else None

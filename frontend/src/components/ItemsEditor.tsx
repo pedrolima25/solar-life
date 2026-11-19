@@ -9,7 +9,7 @@ export type Item = {
   product_id?: string | null; description: string; quantity: number; unit_price: number;
   component?: string | null; qty_label?: string | null;
 };
-export type Product = { id: string; name: string; category: string; unit: string; sale_price: number; stock: number; is_service: boolean };
+export type Product = { id: string; name: string; brand?: string | null; category: string; unit: string; sale_price: number; stock: number; is_service: boolean };
 
 export function itemsTotal(items: Item[]) {
   return Math.round(items.reduce((s, i) => s + (Number(i.quantity) || 0) * (Number(i.unit_price) || 0), 0) * 100) / 100;

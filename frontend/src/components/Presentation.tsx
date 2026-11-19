@@ -145,7 +145,11 @@ export function Presentation({ q, company, clientName, products = [], toolbar }:
           {[
             { icon: CalendarCheck, label: "O sistema se paga em", value: offGrid ? "—" : e.payback ? `${num(e.payback, 1)} anos` : "+25 anos", hint: offGrid ? "Sem conta de luz para comparar" : "Depois disso, a economia é lucro" },
             { icon: TrendingUp, label: "Economia em 25 anos", value: brl(e.economia25), hint: "Com reajustes da tarifa de energia" },
-            { icon: Zap, label: "Seu sistema", value: `${num(e.kwp, 2)} kWp`, hint: `Gera cerca de ${num(e.geracaoMes)} kWh por mês` },
+            { icon: Zap, label: "Seu sistema", value: `${num(e.kwp, 2)} kWp`, hint: [
+              `Gera cerca de ${num(e.geracaoMes)} kWh por mês`,
+              sz?.num_modulos && `${sz.num_modulos} painéis ${sz.marca_painel ?? ""} ${sz.potencia_modulo_w} W`.replace(/\s+/g, " "),
+              sz?.inversor_kw && `inversor ${sz.marca_inversor ?? ""} ${num(sz.inversor_kw, 1).replace(/,0$/, "")} kW`.replace(/\s+/g, " "),
+            ].filter(Boolean).join(" · ") },
           ].map((k) => (
             <div key={k.label} className="break-inside-avoid rounded-3xl bg-white p-5 text-center shadow-sm print:shadow-none print:ring-1 print:ring-zinc-200">
               <k.icon className="mx-auto h-7 w-7 text-amber-500" />

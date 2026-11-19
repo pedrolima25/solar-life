@@ -184,6 +184,20 @@ export default function PrintQuote() {
         </div>
       )}
 
+      {solar && (sz.num_modulos || sz.inversor_kw) ? (
+        <div className="mt-2.5 grid grid-cols-2 border border-[#d5e1ee]">
+          {[
+            ["Inversor", [sz.marca_inversor, sz.inversor_kw ? `${num(sz.inversor_kw, 1).replace(/,0$/, "")} kW` : null]],
+            ["Painéis", [sz.num_modulos ? `${sz.num_modulos} ×` : null, sz.marca_painel, sz.potencia_modulo_w ? `${sz.potencia_modulo_w} W` : null]],
+          ].map(([l, partes], i) => (
+            <div key={l as string} className={i ? "border-l border-[#d5e1ee]" : ""}>
+              <p className="border-b border-[#d5e1ee] bg-[#f4f8fc] py-1.5 text-center text-[10.5px] uppercase tracking-wide text-zinc-500">{l as string}</p>
+              <p className="py-2 text-center text-[16px] font-bold" style={{ color: NAVY }}>{(partes as (string | null)[]).filter(Boolean).join(" ") || "—"}</p>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
       {escopo && (
         <>
           <H2 n={++n}>O que está contemplado</H2>
