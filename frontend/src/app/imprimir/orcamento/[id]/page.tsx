@@ -80,8 +80,10 @@ export default function PrintQuote() {
   const temBateria = q.items.some((it: any) => /bateria/i.test(`${it.component ?? ""} ${it.description}`));
   const sistema: string = sz.tipo_sistema && sz.tipo_sistema !== "On-Grid" ? sz.tipo_sistema : temBateria ? "Híbrido" : "On-Grid";
   const offGrid = sistema === "Off-Grid";
+  const semBateria = sistema === "Híbrido" && sz.tipo_bateria === "Sem bateria";
   const titulo = !solar ? q.service_type
     : offGrid ? "Sistema fotovoltaico off-grid (isolado) com baterias"
+    : semBateria ? "Sistema fotovoltaico híbrido preparado para baterias"
     : sistema === "Híbrido" ? "Sistema fotovoltaico híbrido com baterias"
     : "Sistema de geração de energia solar fotovoltaica";
   const escopo = q.notes || company.escopo_padrao;
@@ -102,6 +104,10 @@ export default function PrintQuote() {
       `Banco de baterias: ${sz.num_baterias} × ${sz.tipo_bateria} ${sz.bateria_unidade} — ${num(sz.banco_kwh, 1)} kWh nominais e ${num(sz.banco_util_kwh, 1)} kWh utilizáveis` +
       (offGrid ? `, autonomia estimada de ${num(sz.autonomia_dias, 1)} dia(s) sem sol.` : `, reserva de cerca de ${num(sz.horas_backup, 1)} h para ${num(sz.carga_essencial_kw, 1)} kW de cargas essenciais quando faltar energia da rede.`) +
       ` Vida útil estimada das baterias: ${sz.vida_bateria_anos} anos.`);
+  }
+  if (solar && semBateria) {
+    observacoes.splice(inv ? 1 : 0, 0,
+      "Sistema preparado para expansão com baterias: o inversor híbrido permite instalar o banco de baterias futuramente, sem trocar o equipamento. Baterias não inclusas nesta proposta.");
   }
   if (solar && offGrid) {
     observacoes.splice(0, 0, "Sistema isolado da rede da concessionária: toda a energia consumida vem das placas e das baterias. O consumo deve respeitar a capacidade do banco, principalmente em dias nublados.");

@@ -13,6 +13,12 @@ Off-Grid (isolado, com baterias)
 Híbrido (ligado à rede + bateria de reserva)
   potência            = igual ao On-Grid
   banco (kWh)         = carga essencial (kW) x horas de reserva / (profundidade de descarga x eficiência)
+  "Sem bateria"       = inversor híbrido sem banco: nenhuma bateria no orçamento, sistema preparado para
+                        receber baterias depois
+
+Quantidades informadas pelo vendedor substituem as calculadas:
+  qtd_paineis   → kWp = qtd_paineis x potência do painel (W) / 1000
+  qtd_baterias  → banco = qtd_baterias x capacidade da unidade
 
 O fluxo de 25 anos considera degradação dos módulos, reajuste da tarifa e a troca das baterias
 ao fim da vida útil.
@@ -27,6 +33,7 @@ EFICIENCIA_OFF_GRID = 0.70    # perdas extras de carga/descarga da bateria e do 
 EFICIENCIA_BATERIA = 0.95
 
 TIPOS_SISTEMA = ("On-Grid", "Off-Grid", "Híbrido")
+SEM_BATERIA = "Sem bateria"
 
 # Profundidade de descarga, capacidade de cada unidade, vida útil e custo relativo
 BATERIAS = {
@@ -37,14 +44,25 @@ BATERIAS = {
 }
 
 
-def _banco(energia_util_kwh: float, tipo_bateria: str, tensao_banco: int, custo_bateria_kwh: float) -> dict:
+def kwp(qtd_paineis: float, potencia_painel_w: float) -> float:
+    """Potência pico do gerador: quantidade de painéis x potência do painel."""
+    return round((qtd_paineis or 0) * (potencia_painel_w or 0) / 1000, 2)
+
+
+def _banco(energia_util_kwh: float, tipo_bateria: str, tensao_banco: int, custo_bateria_kwh: float,
+           qtd_baterias: int | None = None) -> dict:
     b = BATERIAS.get(tipo_bateria, BATERIAS["Lítio"])
-    nominal = energia_util_kwh / (b["dod"] * EFICIENCIA_BATERIA) if energia_util_kwh else 0
-    unidades = math.ceil(nominal / b["unidade_kwh"]) if nominal else 0
-    # Baterias de 12 V precisam de séries completas para formar 48 V (4 unidades)
-    por_serie = b["por_serie"] * max(tensao_banco // 48, 1) if tipo_bateria == "Chumbo-ácido" else b["por_serie"]
-    if unidades and unidades % por_serie:
-        unidades += por_serie - unidades % por_serie
+    if qtd_baterias:
+        unidades = qtd_baterias   # informada pelo vendedor
+    else:
+        nominal = energia_util_kwh / (b["dod"] * EFICIENCIA_BATERIA) if energia_util_kwh else 0
+        unidades = math.ceil(nominal / b["unidade_kwh"]) if nominal else 0
+        # Baterias de 12 V precisam de séries completas para formar 48 V (4 unidades)
+        por_serie = b["por_serie"] * max(tensao_banco // 48, 1) if tipo_bateria == "Chumbo-ácido" else b["por_serie"]
+        if unidades and unidades % por_serie:
+            unidades += por_serie - unidades % por_serie
+    if not unidades:
+        raise ValueError("Informe a quantidade de baterias (maior que zero) ou escolha “Sem bateria”.")
     nominal_real = unidades * b["unidade_kwh"]
     return {
         "tipo_bateria": tipo_bateria if tipo_bateria in BATERIAS else "Lítio",
@@ -64,11 +82,15 @@ def dimensionar(consumo_kwh: float, tipo_ligacao: str, hsp: float, potencia_modu
                 reajuste_anual: float = 0.06, tipo_sistema: str = "On-Grid",
                 tipo_bateria: str = "Lítio", autonomia_dias: float = 1.0,
                 carga_essencial_kw: float = 1.5, horas_backup: float = 4.0,
-                tensao_banco: int = 48, custo_bateria_kwh: float = 2800.0) -> dict:
+                tensao_banco: int = 48, custo_bateria_kwh: float = 2800.0,
+                qtd_paineis: int | None = None, qtd_baterias: int | None = None) -> dict:
     if tipo_sistema not in TIPOS_SISTEMA:
         tipo_sistema = "On-Grid"
     off_grid = tipo_sistema == "Off-Grid"
-    com_bateria = tipo_sistema != "On-Grid"
+    sem_bateria = tipo_sistema == "Híbrido" and tipo_bateria == SEM_BATERIA
+    if off_grid and tipo_bateria == SEM_BATERIA:
+        raise ValueError("Sistema Off-Grid precisa de baterias: escolha Lítio ou Chumbo-ácido.")
+    com_bateria = tipo_sistema != "On-Grid" and not sem_bateria
 
     disponibilidade = 0 if off_grid else DISPONIBILIDADE.get(tipo_ligacao, 50)
     if off_grid:
@@ -77,8 +99,9 @@ def dimensionar(consumo_kwh: float, tipo_ligacao: str, hsp: float, potencia_modu
     fator = hsp * 30 * eficiencia
 
     kwp_necessario = alvo / fator if fator else 0
-    num_modulos = max(math.ceil(kwp_necessario * 1000 / potencia_modulo_w), 1) if alvo else 0
-    kwp_real = num_modulos * potencia_modulo_w / 1000
+    num_modulos_sugerido = max(math.ceil(kwp_necessario * 1000 / potencia_modulo_w), 1) if alvo else 0
+    num_modulos = qtd_paineis or num_modulos_sugerido
+    kwp_real = kwp(num_modulos, potencia_modulo_w)
     geracao_mensal = kwp_real * fator
     consumo_diario = consumo_kwh / 30
 
@@ -91,15 +114,19 @@ def dimensionar(consumo_kwh: float, tipo_ligacao: str, hsp: float, potencia_modu
 
     banco = {}
     if off_grid:
-        banco = _banco(consumo_diario * autonomia_dias, tipo_bateria, tensao_banco, custo_bateria_kwh)
+        banco = _banco(consumo_diario * autonomia_dias, tipo_bateria, tensao_banco, custo_bateria_kwh, qtd_baterias)
         banco["autonomia_dias"] = autonomia_dias
         # Controlador de carga MPPT: corrente dos módulos no banco + 25% de margem
         banco["controlador_a"] = math.ceil(kwp_real * 1000 / tensao_banco * 1.25) if tensao_banco else 0
     elif com_bateria:
-        banco = _banco(carga_essencial_kw * horas_backup, tipo_bateria, tensao_banco, custo_bateria_kwh)
+        banco = _banco(carga_essencial_kw * horas_backup, tipo_bateria, tensao_banco, custo_bateria_kwh, qtd_baterias)
         banco["carga_essencial_kw"] = carga_essencial_kw
         banco["horas_backup"] = horas_backup
         inversor_kw = max(inversor_kw, round(carga_essencial_kw * 1.25, 1))
+    elif sem_bateria:
+        # Inversor híbrido sem banco: nenhuma bateria no orçamento, pronto para receber depois
+        banco = {"tipo_bateria": SEM_BATERIA, "num_baterias": 0, "banco_kwh": 0, "banco_util_kwh": 0,
+                 "custo_baterias": 0.0, "preparado_expansao": True}
 
     if off_grid:
         # Sem conta de luz: a economia é o custo da energia que seria comprada
@@ -155,6 +182,10 @@ def dimensionar(consumo_kwh: float, tipo_ligacao: str, hsp: float, potencia_modu
         "potencia_modulo_w": potencia_modulo_w,
         "kwp_necessario": round(kwp_necessario, 2),
         "num_modulos": num_modulos,
+        "num_modulos_sugerido": num_modulos_sugerido,
+        # Quantidades digitadas pelo vendedor (None = automático); usadas para reabrir o formulário
+        "qtd_paineis": qtd_paineis or None,
+        "qtd_baterias": (qtd_baterias or None) if com_bateria else None,
         "kwp_real": round(kwp_real, 2),
         "inversor_kw": inversor_kw,
         "geracao_mensal_kwh": round(geracao_mensal, 1),

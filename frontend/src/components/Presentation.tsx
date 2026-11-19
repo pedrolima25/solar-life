@@ -29,6 +29,13 @@ const PASSOS: Record<string, { icon: any; title: string; text: string }[]> = {
   ],
 };
 
+/** Híbrido "Sem bateria": inversor híbrido instalado agora, baterias podem entrar depois. */
+const PASSOS_PREPARADO_BATERIA = [
+  PASSOS.Híbrido[0],
+  PASSOS.Híbrido[1],
+  { icon: BatteryCharging, title: "Pronto para baterias", text: "O inversor híbrido já deixa o sistema preparado para receber baterias no futuro, sem trocar equipamento." },
+];
+
 function Section({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return <section className={`break-inside-avoid rounded-3xl bg-white p-6 shadow-sm sm:p-8 print:shadow-none print:ring-1 print:ring-zinc-200 ${className}`}>{children}</section>;
 }
@@ -64,9 +71,10 @@ export function Presentation({ q, company, clientName, products = [], toolbar }:
     }),
   )) as string[];
   const pagamento: string[] = (q.payment_terms || "").split("\n").map((l: string) => l.trim()).filter(Boolean);
-  const passos = PASSOS[e.sistema] ?? PASSOS["On-Grid"];
-  const offGrid = e.sistema === "Off-Grid";
   const sz = e.sz;
+  const semBateria = e.sistema === "Híbrido" && sz?.tipo_bateria === "Sem bateria";
+  const passos = semBateria ? PASSOS_PREPARADO_BATERIA : PASSOS[e.sistema] ?? PASSOS["On-Grid"];
+  const offGrid = e.sistema === "Off-Grid";
   const wa = whatsappLink(company.phone, `Olá! Vi a proposta de energia solar nº ${q.number} (${brl(q.total)}) e quero conversar para fechar.`);
   const economiaPct = e.contaAtual ? Math.round((1 - (e.contaNova ?? 0) / e.contaAtual) * 100) : null;
   const vezesPoupanca = e.rendimentoAno / POUPANCA_ANO;
@@ -96,6 +104,8 @@ export function Presentation({ q, company, clientName, products = [], toolbar }:
             <p className="mt-3 max-w-xl text-white/90 sm:text-lg">
               {offGrid
                 ? "Energia própria, sem depender da rede elétrica: o sol gera, as baterias guardam e a sua casa funciona dia e noite."
+                : semBateria
+                  ? "Economia na conta de luz desde já, com um sistema preparado para receber baterias quando você quiser."
                 : e.sistema === "Híbrido"
                   ? "Economia na conta de luz e tranquilidade quando faltar energia: o sol gera, a rede compensa e a bateria garante o essencial."
                   : "Gere a sua própria energia com o sol e pague muito menos na conta de luz todos os meses."}

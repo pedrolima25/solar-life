@@ -1,7 +1,7 @@
 import datetime as dt
 from typing import Any, List, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ORM(BaseModel):
@@ -183,6 +183,11 @@ class QuoteOut(ORM):
     notes: Optional[str] = None
     local_instalacao: Optional[str] = None
     potencia_kwp: Optional[float] = None
+    qtd_paineis: Optional[int] = None
+    potencia_painel_w: Optional[int] = None
+    kwp: Optional[float] = None
+    tipo_bateria: Optional[str] = None
+    qtd_baterias: Optional[int] = None
     os_id: Optional[str] = None
     created_at: Optional[dt.datetime] = None
     approved_at: Optional[dt.datetime] = None
@@ -324,11 +329,13 @@ class SizingIn(BaseModel):
     eficiencia: float = 0.80
     reajuste_anual: float = 0.06
     tipo_sistema: str = "On-Grid"          # On-Grid | Off-Grid | Híbrido
-    tipo_bateria: str = "Lítio"            # Lítio | Chumbo-ácido
+    tipo_bateria: str = "Lítio"            # Lítio | Chumbo-ácido | Sem bateria (só Híbrido)
     autonomia_dias: float = 1.0            # Off-Grid: dias sem sol cobertos pela bateria
     carga_essencial_kw: float = 1.5        # Híbrido: cargas mantidas quando falta luz
     horas_backup: float = 4.0              # Híbrido: horas de reserva
     tensao_banco: int = 48
+    qtd_paineis: Optional[int] = Field(None, ge=0)    # vazio = calculado pelo consumo
+    qtd_baterias: Optional[int] = Field(None, ge=0)   # vazio = calculado pela autonomia/reserva
 
 
 AnyDict = dict[str, Any]

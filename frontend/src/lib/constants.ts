@@ -18,7 +18,9 @@ export const SISTEMAS_SOLARES = [
   { id: "Híbrido", desc: "Rede + bateria de reserva" },
 ];
 
-export const TIPOS_BATERIA = ["Lítio", "Chumbo-ácido"];
+export const SEM_BATERIA = "Sem bateria";
+/** "Sem bateria" só vale para o Híbrido: o inversor híbrido fica pronto para receber baterias depois. */
+export const TIPOS_BATERIA = ["Lítio", "Chumbo-ácido", SEM_BATERIA];
 
 export const OS_STATUS = [
   { id: "Aberta", color: "bg-sky-500/15 text-sky-500 border-sky-500/30" },

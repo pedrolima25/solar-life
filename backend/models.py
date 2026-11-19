@@ -141,6 +141,12 @@ class Quote(Base):
     notes = Column(Text)
     local_instalacao = Column(String)
     potencia_kwp = Column(Float)        # opcional: sobrescreve a potência calculada pelos itens
+    # Gerador e baterias (preenchidos a partir do dimensionamento ao salvar)
+    qtd_paineis = Column(Integer)
+    potencia_painel_w = Column(Integer)
+    kwp = Column(Float)                 # qtd_paineis x potencia_painel_w / 1000
+    tipo_bateria = Column(String)       # chumbo | litio | sem  (vazio = On-Grid, sem banco)
+    qtd_baterias = Column(Integer)      # 0 quando tipo_bateria = "sem"; > 0 nos outros casos
     # Link público para o cliente ver a apresentação (sem login)
     share_token = Column(String, index=True)
     share_views = Column(Integer, default=0)

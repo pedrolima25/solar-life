@@ -13,7 +13,7 @@ from auth import ADMIN, GESTAO, TECNICO, current_user, roles
 from database import get_db
 from routes.common import apply, get_or_404, next_number, set_items
 from routes.core import company
-from solar import dimensionar
+from solar import SEM_BATERIA, dimensionar, kwp
 
 router = APIRouter(dependencies=[Depends(current_user)])
 
@@ -35,23 +35,28 @@ def solar_sizing(data: s.SizingIn, db: Session = Depends(get_db)):
     if not hsp:
         # Off-Grid é dimensionado pelo pior mês (sem rede para complementar)
         hsp = min(c.hsp_mensal) if data.tipo_sistema == "Off-Grid" and c.hsp_mensal else c.hsp_padrao
-    return dimensionar(
-        consumo_kwh=data.consumo_kwh,
-        tipo_ligacao=data.tipo_ligacao,
-        hsp=hsp,
-        potencia_modulo_w=data.potencia_modulo_w or c.potencia_modulo_w,
-        tarifa_kwh=data.tarifa_kwh or c.tarifa_kwh,
-        custo_kwp=data.custo_kwp or c.custo_kwp,
-        eficiencia=data.eficiencia,
-        reajuste_anual=data.reajuste_anual,
-        tipo_sistema=data.tipo_sistema,
-        tipo_bateria=data.tipo_bateria,
-        autonomia_dias=data.autonomia_dias,
-        carga_essencial_kw=data.carga_essencial_kw,
-        horas_backup=data.horas_backup,
-        tensao_banco=data.tensao_banco,
-        custo_bateria_kwh=c.custo_bateria_kwh or 2800.0,
-    )
+    try:
+        return dimensionar(
+            consumo_kwh=data.consumo_kwh,
+            qtd_paineis=data.qtd_paineis,
+            qtd_baterias=data.qtd_baterias,
+            tipo_ligacao=data.tipo_ligacao,
+            hsp=hsp,
+            potencia_modulo_w=data.potencia_modulo_w or c.potencia_modulo_w,
+            tarifa_kwh=data.tarifa_kwh or c.tarifa_kwh,
+            custo_kwp=data.custo_kwp or c.custo_kwp,
+            eficiencia=data.eficiencia,
+            reajuste_anual=data.reajuste_anual,
+            tipo_sistema=data.tipo_sistema,
+            tipo_bateria=data.tipo_bateria,
+            autonomia_dias=data.autonomia_dias,
+            carga_essencial_kw=data.carga_essencial_kw,
+            horas_backup=data.horas_backup,
+            tensao_banco=data.tensao_banco,
+            custo_bateria_kwh=c.custo_bateria_kwh or 2800.0,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 # ── Orçamentos ──────────────────────────────────────────────────
@@ -68,8 +73,29 @@ def get_quote(qid: str, db: Session = Depends(get_db)):
     return get_or_404(db, models.Quote, qid, "Orçamento")
 
 
+_TIPO_BATERIA = {"Lítio": "litio", "Chumbo-ácido": "chumbo", SEM_BATERIA: "sem"}
+
+
+def _gerador_e_baterias(q: models.Quote, sz: Optional[dict]):
+    """Grava painéis, kWp e baterias do dimensionamento nas colunas do orçamento e valida as baterias."""
+    sz = sz or {}
+    q.qtd_paineis = sz.get("num_modulos") or None
+    q.potencia_painel_w = sz.get("potencia_modulo_w") or None
+    q.kwp = kwp(q.qtd_paineis, q.potencia_painel_w) if q.qtd_paineis and q.potencia_painel_w else None
+    if sz.get("tipo_sistema") in ("Off-Grid", "Híbrido"):
+        q.tipo_bateria = _TIPO_BATERIA.get(sz.get("tipo_bateria"), "litio")
+        q.qtd_baterias = int(sz.get("num_baterias") or 0)
+    else:
+        q.tipo_bateria, q.qtd_baterias = None, None
+    if q.tipo_bateria == "sem" and q.qtd_baterias != 0:
+        raise HTTPException(400, "Com “Sem bateria”, a quantidade de baterias deve ser 0.")
+    if q.tipo_bateria in ("chumbo", "litio") and not q.qtd_baterias:
+        raise HTTPException(400, "Informe a quantidade de baterias (maior que zero) ou escolha “Sem bateria”.")
+
+
 def _save_quote(q: models.Quote, data: s.QuoteIn):
     apply(q, data.model_dump(exclude={"items"}))
+    _gerador_e_baterias(q, data.sizing)
     q.subtotal = set_items(q, models.QuoteItem, data.items)
     q.total = round(max(q.subtotal - (data.discount or 0), 0), 2)
 

@@ -4,7 +4,7 @@ import { BatteryCharging, Cpu, Gauge, Leaf, PiggyBank, SolarPanel, TrendingUp, Z
 import { useEffect, useState } from "react";
 import { Field } from "@/components/ui";
 import { api } from "@/lib/api";
-import { LIGACOES, SISTEMAS_SOLARES, TIPOS_BATERIA } from "@/lib/constants";
+import { LIGACOES, SEM_BATERIA, SISTEMAS_SOLARES, TIPOS_BATERIA } from "@/lib/constants";
 import { brl, num } from "@/lib/format";
 import type { Item, Product } from "./ItemsEditor";
 
@@ -20,12 +20,18 @@ export type SizingInput = {
   autonomia_dias: number | null;
   carga_essencial_kw: number | null;
   horas_backup: number | null;
+  qtd_paineis: number | null;   // vazio = calculado pelo consumo
+  qtd_baterias: number | null;  // vazio = calculado pela autonomia/reserva
 };
 
 export const EMPTY_SIZING: SizingInput = {
   consumo_kwh: null, tipo_ligacao: "Bifásico", hsp: null, potencia_modulo_w: null, tarifa_kwh: null, custo_kwp: null,
   tipo_sistema: "On-Grid", tipo_bateria: "Lítio", autonomia_dias: 1, carga_essencial_kw: 1.5, horas_backup: 4,
+  qtd_paineis: null, qtd_baterias: null,
 };
+
+/** Potência pico do gerador (kWp) = quantidade de painéis × potência do painel (W) / 1000. */
+export const kwp = (qtd: number, wp: number) => +((qtd * wp) / 1000).toFixed(2);
 
 /** Reconstrói o formulário a partir de um dimensionamento salvo. */
 export function sizingInputFrom(r: any): SizingInput {
@@ -44,6 +50,7 @@ export function SizingForm({ input, onInput, onResult, narrow }: {
 }) {
   const [company, setCompany] = useState<any>(null);
   const [error, setError] = useState("");
+  const [last, setLast] = useState<any>(null); // último resultado, para mostrar as quantidades sugeridas
 
   useEffect(() => {
     api("/company").then(setCompany).catch(() => null);
@@ -51,14 +58,15 @@ export function SizingForm({ input, onInput, onResult, narrow }: {
 
   useEffect(() => {
     if (!input.consumo_kwh || input.consumo_kwh <= 0) {
+      setLast(null);
       onResult(null);
       return;
     }
     const t = setTimeout(() => {
       const body = Object.fromEntries(Object.entries(input).filter(([, v]) => v !== null && v !== ""));
       api("/solar/sizing", { method: "POST", json: body })
-        .then((r) => { setError(""); onResult(r); })
-        .catch((e) => setError(e.message));
+        .then((r) => { setError(""); setLast(r); onResult(r); })
+        .catch((e) => { setError(e.message); setLast(null); onResult(null); });
     }, 350);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -71,6 +79,23 @@ export function SizingForm({ input, onInput, onResult, narrow }: {
   });
 
   const sistema = input.tipo_sistema || "On-Grid";
+  const semBateria = sistema === "Híbrido" && input.tipo_bateria === SEM_BATERIA;
+  const tiposBateria = sistema === "Off-Grid" ? TIPOS_BATERIA.filter((b) => b !== SEM_BATERIA) : TIPOS_BATERIA;
+
+  // kWp recalculado na hora: painéis informados (ou sugeridos) × potência do painel (ou a padrão)
+  const qtdPaineis = input.qtd_paineis || last?.num_modulos || 0;
+  const wpPainel = input.potencia_modulo_w || company?.potencia_modulo_w || 0;
+  const kwpGerador = kwp(qtdPaineis, wpPainel);
+
+  function escolherSistema(tipo: string) {
+    // Off-Grid não funciona sem baterias
+    const tipo_bateria = tipo === "Off-Grid" && input.tipo_bateria === SEM_BATERIA ? "Lítio" : input.tipo_bateria;
+    onInput({ ...input, tipo_sistema: tipo, tipo_bateria });
+  }
+
+  function escolherBateria(tipo: string) {
+    onInput({ ...input, tipo_bateria: tipo, qtd_baterias: tipo === SEM_BATERIA ? null : input.qtd_baterias });
+  }
 
   return (
     <div className={`grid gap-4 ${narrow ? "grid-cols-2" : "sm:grid-cols-3"}`}>
@@ -78,7 +103,7 @@ export function SizingForm({ input, onInput, onResult, narrow }: {
         <span className="label">Tipo de sistema</span>
         <div className="grid grid-cols-3 gap-2">
           {SISTEMAS_SOLARES.map((t) => (
-            <button key={t.id} type="button" onClick={() => onInput({ ...input, tipo_sistema: t.id })}
+            <button key={t.id} type="button" onClick={() => escolherSistema(t.id)}
               className={`rounded-xl border px-2 py-2 text-left transition ${sistema === t.id ? "border-primary bg-primary/10" : "border-border bg-background hover:bg-muted"}`}>
               <p className={`text-sm font-semibold ${sistema === t.id ? "text-primary" : ""}`}>{t.id}</p>
               <p className="text-[11px] leading-tight text-muted-foreground">{t.desc}</p>
@@ -93,27 +118,47 @@ export function SizingForm({ input, onInput, onResult, narrow }: {
         </Field>
       )}
       <Field label="Irradiação — HSP (h/dia)"><input className="input" type="number" step="0.1" placeholder={company ? String(company.hsp_padrao) : ""} {...set("hsp")} /></Field>
-      <Field label="Potência do módulo (W)"><input className="input" type="number" placeholder={company ? String(company.potencia_modulo_w) : ""} {...set("potencia_modulo_w")} /></Field>
+      <Field label="Potência do painel (W)"><input className="input" type="number" min={0} placeholder={company ? String(company.potencia_modulo_w) : ""} {...set("potencia_modulo_w")} /></Field>
+      <Field label="Quantidade de painéis">
+        <input className="input" type="number" min={1} step={1} placeholder={last?.num_modulos_sugerido ? `Automático: ${last.num_modulos_sugerido}` : "Automático"} {...set("qtd_paineis")} />
+      </Field>
+      <Field label="Potência pico (kWp)">
+        <input className="input cursor-not-allowed bg-muted font-semibold" readOnly tabIndex={-1} value={kwpGerador ? num(kwpGerador, 2) : "—"}
+          title="Quantidade de painéis × potência do painel ÷ 1000" />
+      </Field>
       <Field label="Tarifa (R$/kWh)"><input className="input" type="number" step="0.01" placeholder={company ? String(company.tarifa_kwh) : ""} {...set("tarifa_kwh")} /></Field>
       <Field label="Preço por kWp (R$)"><input className="input" type="number" placeholder={company ? String(company.custo_kwp) : ""} {...set("custo_kwp")} /></Field>
       {sistema !== "On-Grid" && (
         <>
           <Field label="Tipo de bateria">
-            <select className="input" {...set("tipo_bateria", false)}>{TIPOS_BATERIA.map((b) => <option key={b}>{b}</option>)}</select>
+            <select className="input" value={input.tipo_bateria} onChange={(e) => escolherBateria(e.target.value)}>
+              {tiposBateria.map((b) => <option key={b}>{b}</option>)}
+            </select>
+          </Field>
+          <Field label="Quantidade de baterias">
+            {semBateria
+              ? <input className="input cursor-not-allowed bg-muted" disabled value={0} />
+              : <input className="input" type="number" min={1} step={1} placeholder={last?.num_baterias ? `Automático: ${last.num_baterias}` : "Automático"}
+                  value={input.qtd_baterias ?? ""} onChange={(e) => onInput({ ...input, qtd_baterias: e.target.value === "" ? null : Number(e.target.value) })} />}
           </Field>
           {sistema === "Off-Grid" ? (
             <Field label="Autonomia (dias sem sol)"><input className="input" type="number" step="0.5" min={0.5} {...set("autonomia_dias")} /></Field>
-          ) : (
+          ) : !semBateria && (
             <>
               <Field label="Cargas essenciais (kW)"><input className="input" type="number" step="0.1" min={0} {...set("carga_essencial_kw")} /></Field>
               <Field label="Reserva sem luz (horas)"><input className="input" type="number" step="0.5" min={0} {...set("horas_backup")} /></Field>
             </>
           )}
+          {semBateria && (
+            <p className="col-span-full rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-xs">
+              <b>Sem bateria:</b> nenhuma bateria entra no orçamento. O inversor híbrido já deixa o sistema preparado para receber baterias depois.
+            </p>
+          )}
         </>
       )}
       {error && <p className="col-span-full text-sm text-red-500">{error}</p>}
       <p className="col-span-full text-xs text-muted-foreground">
-        Campos em branco usam os valores padrão definidos em Configurações.
+        Campos em branco usam os valores padrão definidos em Configurações. Quantidades em branco são calculadas pelo consumo.
         {sistema === "Off-Grid" && " No Off-Grid, o HSP em branco usa o pior mês do ano, pois não há rede para complementar."}
         {sistema === "Híbrido" && " Cargas essenciais: o que precisa funcionar quando faltar luz (geladeira, iluminação, internet, bomba…)."}
       </p>
@@ -131,7 +176,12 @@ export function SizingResult({ r, compact }: { r: any; compact?: boolean }) {
     { icon: Leaf, label: "Economia em 25 anos", value: brl(r.economia_25_anos), hint: `${num(r.co2_evitado_ton_ano, 2)} t de CO₂ evitadas/ano` },
   ];
   const sistema = r.tipo_sistema || "On-Grid";
-  if (sistema !== "On-Grid") {
+  if (sistema === "Híbrido" && r.tipo_bateria === SEM_BATERIA) {
+    cards.splice(3, 0, {
+      icon: BatteryCharging, label: "Baterias", value: "Sem bateria",
+      hint: "Sistema preparado para expansão com baterias (inversor híbrido)",
+    });
+  } else if (sistema !== "On-Grid") {
     cards.splice(3, 0, {
       icon: BatteryCharging, label: "Banco de baterias", value: `${num(r.banco_kwh, 1)} kWh`,
       hint: `${r.num_baterias} × ${r.tipo_bateria} ${r.bateria_unidade} · ${num(r.banco_util_kwh, 1)} kWh úteis`,
