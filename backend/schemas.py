@@ -169,6 +169,7 @@ class QuoteIn(BaseModel):
     status: str = "Rascunho"
     sizing: Optional[dict] = None
     discount: float = 0
+    valor_investimento: Optional[float] = Field(None, gt=0)  # vazio = soma dos itens − desconto
     payment_terms: Optional[str] = None
     validity_days: int = 15
     notes: Optional[str] = None
@@ -188,6 +189,7 @@ class QuoteOut(ORM):
     sizing: Optional[dict] = None
     subtotal: float
     discount: float
+    valor_investimento: Optional[float] = None
     total: float
     payment_terms: Optional[str] = None
     validity_days: int

@@ -145,6 +145,7 @@ class Quote(Base):
     sizing = Column(JSON)  # resultado do dimensionamento solar
     subtotal = Column(Float, default=0)
     discount = Column(Float, default=0)
+    valor_investimento = Column(Float)  # opcional: valor final digitado; substitui itens − desconto
     total = Column(Float, default=0)
     payment_terms = Column(String)
     validity_days = Column(Integer, default=15)

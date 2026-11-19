@@ -108,7 +108,8 @@ def _save_quote(q: models.Quote, data: s.QuoteIn):
     apply(q, data.model_dump(exclude={"items"}))
     _gerador_e_baterias(q, data.sizing)
     q.subtotal = set_items(q, models.QuoteItem, data.items)
-    q.total = round(max(q.subtotal - (data.discount or 0), 0), 2)
+    # Valor do investimento digitado substitui a soma dos itens menos o desconto
+    q.total = round(data.valor_investimento if data.valor_investimento else max(q.subtotal - (data.discount or 0), 0), 2)
 
 
 @router.post("/quotes", response_model=s.QuoteOut, dependencies=[Depends(roles(*GESTAO))])

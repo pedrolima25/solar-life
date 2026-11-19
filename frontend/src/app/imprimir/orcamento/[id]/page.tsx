@@ -214,7 +214,7 @@ export default function PrintQuote() {
           <tr>
             <td className="px-3 py-4 text-[22px] font-bold" style={{ color: NAVY }}>
               {brl(q.total)}
-              {q.discount > 0 && <span className="block text-[11px] font-normal text-zinc-500">Já com desconto de {brl(q.discount)}</span>}
+              {q.discount > 0 && !q.valor_investimento && <span className="block text-[11px] font-normal text-zinc-500">Já com desconto de {brl(q.discount)}</span>}
             </td>
             <td className="border-l border-[#d5e1ee] px-3 py-3 leading-relaxed">
               {pagamento.length ? pagamento.map((l, i) => {

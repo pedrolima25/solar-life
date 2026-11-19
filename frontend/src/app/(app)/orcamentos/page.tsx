@@ -22,6 +22,7 @@ type QuoteForm = {
   sizing: any;
   sizingInput: SizingInput;
   discount: number;
+  valor_investimento: number | null; // vazio = soma dos itens − desconto
   payment_terms: string;
   validity_days: number;
   notes: string;
@@ -32,7 +33,7 @@ type QuoteForm = {
 
 const EMPTY: QuoteForm = {
   client_id: "", installation_id: null, service_type: "Instalação Solar", status: "Rascunho", sizing: null,
-  sizingInput: EMPTY_SIZING, discount: 0, payment_terms: "", validity_days: 15, notes: "", local_instalacao: "", potencia_kwp: null, items: [],
+  sizingInput: EMPTY_SIZING, discount: 0, valor_investimento: null, payment_terms: "", validity_days: 15, notes: "", local_instalacao: "", potencia_kwp: null, items: [],
 };
 
 function OrcamentosContent() {
@@ -77,7 +78,7 @@ function OrcamentosContent() {
     setForm({
       id: q.id, client_id: q.client_id, installation_id: q.installation_id, service_type: q.service_type, status: q.status,
       sizing: q.sizing, sizingInput: sizingInputFrom(q.sizing),
-      discount: q.discount, payment_terms: q.payment_terms ?? "", validity_days: q.validity_days, notes: q.notes ?? "",
+      discount: q.discount, valor_investimento: q.valor_investimento ?? null, payment_terms: q.payment_terms ?? "", validity_days: q.validity_days, notes: q.notes ?? "",
       local_instalacao: q.local_instalacao ?? "", potencia_kwp: q.potencia_kwp ?? null,
       items: q.items.map(({ product_id, description, quantity, unit_price, component, qty_label }: any) => ({ product_id, description, quantity, unit_price, component, qty_label })),
     });
@@ -216,7 +217,8 @@ function QuoteModal({ form, setForm, clients, products, onSaved }: {
   const isSolar = form.service_type === "Instalação Solar";
   const subtotal = itemsTotal(form.items);
   const set = (patch: Partial<QuoteForm>) => setForm({ ...form, ...patch });
-  const total = Math.max(subtotal - (form.discount || 0), 0);
+  const totalItens = Math.max(subtotal - (form.discount || 0), 0);
+  const total = form.valor_investimento || totalItens;
   const kwpItens = kwpFromItems(form.items);
   const client = clients.find((c) => c.id === form.client_id);
 
@@ -287,7 +289,18 @@ function QuoteModal({ form, setForm, clients, products, onSaved }: {
         </section>
 
         <div className="grid gap-4 sm:grid-cols-4">
-          <Field label="Desconto (R$)"><input className="input" type="number" min={0} step="0.01" value={form.discount} onChange={(e) => set({ discount: Number(e.target.value) })} /></Field>
+          <Field label="Valor do investimento (R$)" className="sm:col-span-2">
+            <input className="input font-semibold" type="number" min={0} step="0.01" placeholder={`${brl(totalItens)} (soma dos itens)`}
+              value={form.valor_investimento ?? ""} onChange={(e) => set({ valor_investimento: Number(e.target.value) > 0 ? Number(e.target.value) : null })} />
+            <p className="mt-1 text-xs text-muted-foreground">
+              {form.valor_investimento
+                ? <>Valor digitado vai para a proposta (itens somam {brl(subtotal)}). <button type="button" className="text-primary underline" onClick={() => set({ valor_investimento: null })}>Voltar para a soma dos itens</button></>
+                : "Em branco = soma dos itens menos o desconto."}
+            </p>
+          </Field>
+          <Field label="Desconto (R$)"><input className="input" type="number" min={0} step="0.01" disabled={!!form.valor_investimento}
+            title={form.valor_investimento ? "Não se aplica com valor do investimento digitado" : undefined}
+            value={form.valor_investimento ? "" : form.discount} onChange={(e) => set({ discount: Number(e.target.value) })} /></Field>
           <Field label="Validade (dias)"><input className="input" type="number" min={1} value={form.validity_days} onChange={(e) => set({ validity_days: Number(e.target.value) })} /></Field>
           <Field label="Local de instalação" className="sm:col-span-2">
             <input className="input" placeholder={localLabel(client) || "Ex.: Boa Vista, Roraima"} value={form.local_instalacao} onChange={(e) => set({ local_instalacao: e.target.value })} />
